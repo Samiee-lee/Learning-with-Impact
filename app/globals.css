@@ -131,3 +131,47 @@ tr:last-child td { border-bottom: none; }
   .grid { grid-template-columns: 1fr; }
   .page, .topbar { padding-left: 16px; padding-right: 16px; }
 }
+
+/* ============ Phase 3b additions ============ */
+
+.card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.card-head h2 { margin-bottom: 0; }
+
+.btn-small {
+  border: 1px solid var(--brand); background: #fff; color: var(--brand);
+  padding: 7px 14px; border-radius: 8px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.btn-small:hover { background: #eef1fb; }
+
+.inline-form {
+  background: #f9fafd; border: 1px solid var(--line); border-radius: 12px;
+  padding: 18px; margin-bottom: 18px;
+}
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.field-wide { grid-column: 1 / -1; }
+.field select {
+  width: 100%; border: 1px solid var(--line); border-radius: 10px;
+  padding: 11px 13px; font-size: 14px; outline: none; background: #fff;
+}
+.field select:focus { border-color: var(--brand); }
+
+.pill.launched { background: #e8f0ff; color: var(--brand); }
+.pill.closed   { background: #f1f2f6; color: var(--muted); }
+.pill.pending  { background: #fff4e5; color: #b5651d; }
+
+.empty { color: var(--muted); font-size: 13px; padding: 18px 4px; }
+
+.unit { font-size: 15px; font-weight: 600; color: var(--muted); margin-left: 2px; }
+
+/* Horizontal bars (executive WIG roll-up) */
+.bars { display: flex; flex-direction: column; gap: 14px; }
+.bar-row { display: grid; grid-template-columns: 1fr 2fr auto; align-items: center; gap: 12px; }
+.bar-label { font-size: 12.5px; color: #333; }
+.bar-track { background: #eef0f6; border-radius: 999px; height: 12px; overflow: hidden; }
+.bar-fill { background: var(--brand); height: 100%; border-radius: 999px; }
+.bar-value { font-size: 13px; font-weight: 700; color: var(--brand); min-width: 20px; text-align: right; }
+
+@media (max-width: 780px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .bar-row { grid-template-columns: 1fr 1.4fr auto; }
+}
