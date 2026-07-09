@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { pretty } from '../lib/format';
+import AiInsightCard from './AiInsightCard';
 
 export default function ExecutiveDashboard({ profile }) {
   const [loading, setLoading] = useState(true);
@@ -97,13 +98,16 @@ export default function ExecutiveDashboard({ profile }) {
           </div>
         </div>
 
-        <div className="card">
-          <h2>AI Insight</h2>
-          <div className="insight">
-            <span className="tag">Executive summary</span>
-            <div>{pretty(insight) || 'No insights generated yet.'}</div>
-          </div>
-        </div>
+        <AiInsightCard
+          initialInsight={insight}
+          profileId={profile.id}
+          summary={
+            `Average learning rating: ${avgReaction ?? 'n/a'}/5. ` +
+            `Business impact score: ${impactScore ?? 'n/a'}. ` +
+            `Responses collected: ${responses}. ` +
+            `Trainings per WIG: ${wigRollup.map((w) => `${w.name}: ${w.count}`).join('; ')}.`
+          }
+        />
       </div>
     </div>
   );

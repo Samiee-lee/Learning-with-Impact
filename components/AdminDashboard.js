@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { pretty } from '../lib/format';
+import AiInsightCard from './AiInsightCard';
+
+const EMPTY = { title: '', objective: '', ttype: 'internal', wigId: '', audience: '', status: 'draft' };
 
 export default function AdminDashboard({ profile }) {
   const [loading, setLoading] = useState(true);
@@ -11,20 +14,21 @@ export default function AdminDashboard({ profile }) {
   const [wigs, setWigs] = useState([]);
   const [insight, setInsight] = useState('');
 
-  // New-training form
+  // Form state (used for both create and edit)
   const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null); // null = create mode
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
-  const [title, setTitle] = useState('');
-  const [objective, setObjective] = useState('');
-  const [ttype, setTtype] = useState('internal');
-  const [wigId, setWigId] = useState('');
-  const [audience, setAudience] = useState('');
+  const [form, setForm] = useState(EMPTY);
+
+  function setField(key, value) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
 
   async function loadData() {
     const { data: tr } = await supabase
       .from('trainings')
-      .select('id, title, training_type, status, wigs(name)')
+      .select('id, title, one_line_objective, training_type, status, target_audience, wig_id, wigs(name)')
       .order('created_at', { ascending: true });
     setTrainings(tr || []);
 
@@ -59,40 +63,94 @@ export default function AdminDashboard({ profile }) {
     loadData();
   }, []);
 
-  async function handleCreate(e) {
+  function openCreate() {
+    setEditingId(null);
+    setForm(EMPTY);
+    setMsg('');
+    setFormOpen(true);
+  }
+
+  function startEdit(t) {
+    setEditingId(t.id);
+    setForm({
+      title: t.title || '',
+      objective: t.one_line_objective || '',
+      ttype: t.training_type || 'internal',
+      wigId: t.wig_id || '',
+      audience: t.target_audience || '',
+      status: t.status || 'draft',
+    });
+    setMsg('');
+    setFormOpen(true);
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    setEditingId(null);
+    setForm(EMPTY);
+    setMsg('');
+  }
+
+  async function handleSubmit(e) {
     e.preventDefault();
     setMsg('');
-    if (!title.trim() || !objective.trim()) {
+    if (!form.title.trim() || !form.objective.trim()) {
       setMsg('Title and objective are required.');
       return;
     }
     setSaving(true);
-    const { error } = await supabase.from('trainings').insert({
-      title: title.trim(),
-      one_line_objective: objective.trim(),
-      training_type: ttype,
-      wig_id: wigId || null,
-      target_audience: audience.trim() || null,
-      status: 'draft',
-      created_by: profile.id,
-    });
+
+    const payload = {
+      title: form.title.trim(),
+      one_line_objective: form.objective.trim(),
+      training_type: form.ttype,
+      wig_id: form.wigId || null,
+      target_audience: form.audience.trim() || null,
+      status: form.status,
+    };
+
+    let error;
+    if (editingId) {
+      ({ error } = await supabase.from('trainings').update(payload).eq('id', editingId));
+    } else {
+      ({ error } = await supabase.from('trainings').insert({ ...payload, created_by: profile.id }));
+    }
+
     setSaving(false);
     if (error) {
       setMsg('Could not save: ' + error.message);
       return;
     }
-    // reset + refresh
-    setTitle('');
-    setObjective('');
-    setTtype('internal');
-    setWigId('');
-    setAudience('');
-    setFormOpen(false);
-    setMsg('');
+    closeForm();
+    await loadData();
+  }
+
+  async function handleDelete(t) {
+    const ok =
+      typeof window !== 'undefined' &&
+      window.confirm(
+        `Delete "${t.title}"?\n\nThis also permanently removes any evaluations, responses and ` +
+          `results linked to this training. This cannot be undone.`
+      );
+    if (!ok) return;
+
+    const { error } = await supabase.from('trainings').delete().eq('id', t.id);
+    if (error) {
+      alert('Could not delete: ' + error.message);
+      return;
+    }
     await loadData();
   }
 
   if (loading) return <div className="center-note">Loading…</div>;
+
+  const aiSummary =
+    `Trainings: ${stats.trainings}; Strategic WIGs: ${stats.wigs}; ` +
+    `Evaluations launched: ${stats.evals}; Responses collected: ${stats.responses}. ` +
+    `Programmes: ${trainings
+      .map((t) => `${t.title} [${t.status}, WIG: ${t.wigs?.name || 'none'}]`)
+      .join('; ')}.`;
 
   return (
     <div className="page">
@@ -111,33 +169,38 @@ export default function AdminDashboard({ profile }) {
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="card-head">
           <h2>Trainings</h2>
-          <button className="btn-small" onClick={() => setFormOpen(!formOpen)}>
-            {formOpen ? 'Cancel' : '+ Register training'}
-          </button>
+          {formOpen ? (
+            <button className="btn-small" onClick={closeForm}>Cancel</button>
+          ) : (
+            <button className="btn-small" onClick={openCreate}>+ Register training</button>
+          )}
         </div>
 
         {formOpen && (
-          <form onSubmit={handleCreate} className="inline-form">
+          <form onSubmit={handleSubmit} className="inline-form">
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>
+              {editingId ? 'Edit training' : 'New training'}
+            </div>
             {msg ? <div className="login-error" style={{ marginBottom: 14 }}>{msg}</div> : null}
             <div className="form-grid">
               <div className="field">
                 <label>Title</label>
-                <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Fraud Awareness Bootcamp" />
+                <input value={form.title} onChange={(e) => setField('title', e.target.value)} placeholder="e.g. Fraud Awareness Bootcamp" />
               </div>
               <div className="field">
                 <label>Type</label>
-                <select value={ttype} onChange={(e) => setTtype(e.target.value)}>
+                <select value={form.ttype} onChange={(e) => setField('ttype', e.target.value)}>
                   <option value="internal">Internal</option>
                   <option value="external">External</option>
                 </select>
               </div>
               <div className="field field-wide">
                 <label>One-line objective</label>
-                <input value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="What should this training achieve?" />
+                <input value={form.objective} onChange={(e) => setField('objective', e.target.value)} placeholder="What should this training achieve?" />
               </div>
               <div className="field">
                 <label>Linked WIG</label>
-                <select value={wigId} onChange={(e) => setWigId(e.target.value)}>
+                <select value={form.wigId} onChange={(e) => setField('wigId', e.target.value)}>
                   <option value="">— select —</option>
                   {wigs.map((w) => (
                     <option key={w.id} value={w.id}>{pretty(w.name)}</option>
@@ -146,18 +209,26 @@ export default function AdminDashboard({ profile }) {
               </div>
               <div className="field">
                 <label>Target audience</label>
-                <input value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="e.g. Sales agents" />
+                <input value={form.audience} onChange={(e) => setField('audience', e.target.value)} placeholder="e.g. Sales agents" />
+              </div>
+              <div className="field">
+                <label>Status</label>
+                <select value={form.status} onChange={(e) => setField('status', e.target.value)}>
+                  <option value="draft">Draft</option>
+                  <option value="active">Active</option>
+                  <option value="completed">Completed</option>
+                </select>
               </div>
             </div>
             <button type="submit" className="btn-primary" style={{ width: 'auto', padding: '10px 22px' }} disabled={saving}>
-              {saving ? 'Saving…' : 'Save training'}
+              {saving ? 'Saving…' : editingId ? 'Save changes' : 'Save training'}
             </button>
           </form>
         )}
 
         <table>
           <thead>
-            <tr><th>Title</th><th>Type</th><th>WIG</th><th>Status</th></tr>
+            <tr><th>Title</th><th>Type</th><th>WIG</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr>
           </thead>
           <tbody>
             {trainings.map((t) => (
@@ -166,19 +237,20 @@ export default function AdminDashboard({ profile }) {
                 <td style={{ textTransform: 'capitalize' }}>{t.training_type}</td>
                 <td>{pretty(t.wigs?.name)}</td>
                 <td><span className={`pill ${t.status}`}>{t.status}</span></td>
+                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <button className="link-btn" onClick={() => startEdit(t)}>Edit</button>
+                  <button className="link-btn danger" onClick={() => handleDelete(t)}>Delete</button>
+                </td>
               </tr>
             ))}
+            {trainings.length === 0 && (
+              <tr><td colSpan={5} className="empty">No trainings yet. Click “Register training”.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
 
-      <div className="card">
-        <h2>AI Insight</h2>
-        <div className="insight">
-          <span className="tag">Executive summary</span>
-          <div>{pretty(insight) || 'No insights generated yet.'}</div>
-        </div>
-      </div>
+      <AiInsightCard initialInsight={insight} profileId={profile.id} summary={aiSummary} />
     </div>
   );
 }
