@@ -25,17 +25,27 @@ export default function EmployeeDashboard({ profile }) {
     const trainings = (assigns || []).map((a) => a.trainings).filter(Boolean);
     setMyTrainings(trainings);
 
-    const trainingIds = trainings.map((t) => t.id);
+    const trainingIds = new Set(trainings.map((t) => t.id));
 
-    let launched = [];
-    if (trainingIds.length) {
-      const { data: ev } = await supabase
-        .from('evaluations')
-        .select('id, level, status, training_id, trainings(title)')
-        .in('training_id', trainingIds)
-        .eq('status', 'launched');
-      launched = ev || [];
-    }
+    // Fetch every launched evaluation, then keep only the ones that target me.
+    const { data: allEv } = await supabase
+      .from('evaluations')
+      .select('id, level, status, scope, scope_ref, training_id, trainings(title)')
+      .eq('status', 'launched');
+
+    const launched = (allEv || []).filter((ev) => {
+      switch (ev.scope) {
+        case 'organization':
+          return true;
+        case 'department':
+          return !!profile.department && ev.scope_ref === profile.department;
+        case 'employee':
+          return ev.scope_ref === profile.id;
+        case 'programme':
+        default:
+          return trainingIds.has(ev.training_id);
+      }
+    });
 
     const { data: myResp } = await supabase
       .from('evaluation_responses')
@@ -49,7 +59,7 @@ export default function EmployeeDashboard({ profile }) {
 
     setEvals(launched.map((ev) => ({ ...ev, done: submittedSet.has(ev.id) })));
     setLoading(false);
-  }, [profile.id]);
+  }, [profile.id, profile.department]);
 
   useEffect(() => {
     load();

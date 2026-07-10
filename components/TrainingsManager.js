@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { pretty } from '../lib/format';
 
@@ -10,12 +10,17 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
   const [loading, setLoading] = useState(true);
   const [trainings, setTrainings] = useState([]);
   const [wigs, setWigs] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [assignments, setAssignments] = useState({}); // training_id -> Set(employee_id)
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [form, setForm] = useState(EMPTY);
+
+  const [participantsFor, setParticipantsFor] = useState(null); // training id expanded
+  const [savingParticipants, setSavingParticipants] = useState(false);
 
   function setField(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -30,6 +35,21 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
 
     const { data: w } = await supabase.from('wigs').select('id, name').order('name');
     setWigs(w || []);
+
+    const { data: emp } = await supabase
+      .from('profiles')
+      .select('id, full_name, department')
+      .eq('role', 'employee')
+      .order('full_name');
+    setEmployees(emp || []);
+
+    const { data: asg } = await supabase.from('training_assignments').select('training_id, employee_id');
+    const map = {};
+    (asg || []).forEach((a) => {
+      if (!map[a.training_id]) map[a.training_id] = new Set();
+      map[a.training_id].add(a.employee_id);
+    });
+    setAssignments(map);
 
     setLoading(false);
   }
@@ -120,6 +140,32 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
     if (onChanged) onChanged();
   }
 
+  function toggleParticipants(id) {
+    setParticipantsFor(participantsFor === id ? null : id);
+  }
+
+  async function toggleAssignment(trainingId, employeeId) {
+    setSavingParticipants(true);
+    const current = assignments[trainingId] || new Set();
+    const isAssigned = current.has(employeeId);
+
+    if (isAssigned) {
+      await supabase
+        .from('training_assignments')
+        .delete()
+        .eq('training_id', trainingId)
+        .eq('employee_id', employeeId);
+    } else {
+      await supabase
+        .from('training_assignments')
+        .insert({ training_id: trainingId, employee_id: employeeId });
+    }
+
+    await loadData();
+    setSavingParticipants(false);
+    if (onChanged) onChanged();
+  }
+
   if (loading) return <div className="center-note">Loading…</div>;
 
   return (
@@ -185,23 +231,78 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
 
       <table>
         <thead>
-          <tr><th>Title</th><th>Type</th><th>WIG</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr>
+          <tr>
+            <th>Title</th><th>Type</th><th>WIG</th>
+            <th style={{ textAlign: 'center' }}>Participants</th>
+            <th>Status</th>
+            <th style={{ textAlign: 'right' }}>Actions</th>
+          </tr>
         </thead>
         <tbody>
-          {trainings.map((t) => (
-            <tr key={t.id}>
-              <td>{t.title}</td>
-              <td style={{ textTransform: 'capitalize' }}>{t.training_type}</td>
-              <td>{pretty(t.wigs?.name)}</td>
-              <td><span className={`pill ${t.status}`}>{t.status}</span></td>
-              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                <button className="link-btn" onClick={() => startEdit(t)}>Edit</button>
-                <button className="link-btn danger" onClick={() => handleDelete(t)}>Delete</button>
-              </td>
-            </tr>
-          ))}
+          {trainings.map((t) => {
+            const assigned = assignments[t.id] || new Set();
+            const isOpen = participantsFor === t.id;
+            return (
+              <Fragment key={t.id}>
+                <tr>
+                  <td>{t.title}</td>
+                  <td style={{ textTransform: 'capitalize' }}>{t.training_type}</td>
+                  <td>{pretty(t.wigs?.name)}</td>
+                  <td style={{ textAlign: 'center' }}>
+                    <button className="link-btn" onClick={() => toggleParticipants(t.id)}>
+                      <span className="count-chip">{assigned.size}</span>
+                    </button>
+                  </td>
+                  <td><span className={`pill ${t.status}`}>{t.status}</span></td>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button className="link-btn" onClick={() => toggleParticipants(t.id)}>
+                      {isOpen ? 'Hide' : 'Participants'}
+                    </button>
+                    <button className="link-btn" onClick={() => startEdit(t)}>Edit</button>
+                    <button className="link-btn danger" onClick={() => handleDelete(t)}>Delete</button>
+                  </td>
+                </tr>
+                {isOpen && (
+                  <tr>
+                    <td colSpan={6} className="detail-cell">
+                      <div className="detail-box">
+                        <div className="detail-title">
+                          Who attended “{t.title}”
+                          {savingParticipants ? ' — saving…' : ''}
+                        </div>
+                        {employees.length === 0 ? (
+                          <div className="empty" style={{ padding: '6px 0' }}>
+                            No employees found. Add users with the “employee” role first.
+                          </div>
+                        ) : (
+                          <div className="checkbox-list">
+                            {employees.map((emp) => (
+                              <label key={emp.id} className="checkbox-row">
+                                <input
+                                  type="checkbox"
+                                  checked={assigned.has(emp.id)}
+                                  disabled={savingParticipants}
+                                  onChange={() => toggleAssignment(t.id, emp.id)}
+                                />
+                                <span>{emp.full_name}</span>
+                                <span className="dept-tag">{emp.department || '—'}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        <div className="field-hint">
+                          Ticking someone enrols them. They will then see any evaluation launched
+                          for this training with “programme” scope.
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
           {trainings.length === 0 && (
-            <tr><td colSpan={5} className="empty">No trainings yet. Click “Register training”.</td></tr>
+            <tr><td colSpan={6} className="empty">No trainings yet. Click “Register training”.</td></tr>
           )}
         </tbody>
       </table>

@@ -4,11 +4,18 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { LEVELS, DEFAULT_QUESTIONS, SCOPES } from '../lib/evaluationConfig';
 
+const SCOPE_HINTS = {
+  programme: 'Everyone enrolled in this training',
+  department: 'Every employee in one department',
+  organization: 'Every employee in the organisation',
+  employee: 'One specific person',
+};
+
 export default function EvaluationManager({ profile, onChanged, refreshKey }) {
   const [loading, setLoading] = useState(true);
   const [evaluations, setEvaluations] = useState([]);
   const [trainings, setTrainings] = useState([]);
-  const [responseCounts, setResponseCounts] = useState({});
+  const [responseCounts, setResponseCounts] = useState({}); // eval_id -> submitted count
 
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -16,11 +23,14 @@ export default function EvaluationManager({ profile, onChanged, refreshKey }) {
   const [trainingId, setTrainingId] = useState('');
   const [level, setLevel] = useState('1');
   const [scope, setScope] = useState('programme');
+  const [scopeRef, setScopeRef] = useState('');
+  const [employees, setEmployees] = useState([]);
+  const [departments, setDepartments] = useState([]);
 
   async function loadData() {
     const { data: ev } = await supabase
       .from('evaluations')
-      .select('id, level, scope, status, launched_at, training_id, trainings(title)')
+      .select('id, level, scope, scope_ref, status, launched_at, training_id, trainings(title)')
       .order('launched_at', { ascending: false });
     setEvaluations(ev || []);
 
@@ -29,6 +39,14 @@ export default function EvaluationManager({ profile, onChanged, refreshKey }) {
       .select('id, title')
       .order('title');
     setTrainings(tr || []);
+
+    const { data: emp } = await supabase
+      .from('profiles')
+      .select('id, full_name, department')
+      .eq('role', 'employee')
+      .order('full_name');
+    setEmployees(emp || []);
+    setDepartments([...new Set((emp || []).map((e) => e.department).filter(Boolean))].sort());
 
     const { data: resp } = await supabase
       .from('evaluation_responses')
@@ -57,6 +75,7 @@ export default function EvaluationManager({ profile, onChanged, refreshKey }) {
     }
     setSaving(true);
 
+    // Guard: don't launch the same level twice for the same training
     const { data: existing } = await supabase
       .from('evaluations')
       .select('id')
@@ -70,12 +89,14 @@ export default function EvaluationManager({ profile, onChanged, refreshKey }) {
       return;
     }
 
+    // 1. Create the evaluation
     const { data: created, error } = await supabase
       .from('evaluations')
       .insert({
         training_id: trainingId,
         level: Number(level),
         scope,
+        scope_ref: ref,
         status: 'launched',
         launched_by: profile.id,
         launched_at: new Date().toISOString(),
@@ -89,6 +110,7 @@ export default function EvaluationManager({ profile, onChanged, refreshKey }) {
       return;
     }
 
+    // 2. Attach the default questions for that level
     const questions = (DEFAULT_QUESTIONS[Number(level)] || []).map((q, i) => ({
       evaluation_id: created.id,
       question_text: q.question_text,
@@ -111,6 +133,7 @@ export default function EvaluationManager({ profile, onChanged, refreshKey }) {
     setTrainingId('');
     setLevel('1');
     setScope('programme');
+    setScopeRef('');
     await loadData();
     if (onChanged) onChanged();
   }
@@ -182,12 +205,42 @@ export default function EvaluationManager({ profile, onChanged, refreshKey }) {
             </div>
             <div className="field">
               <label>Scope</label>
-              <select value={scope} onChange={(e) => setScope(e.target.value)}>
+              <select
+                value={scope}
+                onChange={(e) => { setScope(e.target.value); setScopeRef(''); }}
+              >
                 {SCOPES.map((s) => (
                   <option key={s} value={s} style={{ textTransform: 'capitalize' }}>{s}</option>
                 ))}
               </select>
+              <div className="field-hint">{SCOPE_HINTS[scope]}</div>
             </div>
+
+            {scope === 'employee' && (
+              <div className="field field-wide">
+                <label>Which employee?</label>
+                <select value={scopeRef} onChange={(e) => setScopeRef(e.target.value)}>
+                  <option value="">— select an employee —</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.full_name}{emp.department ? ` (${emp.department})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {scope === 'department' && (
+              <div className="field field-wide">
+                <label>Which department?</label>
+                <select value={scopeRef} onChange={(e) => setScopeRef(e.target.value)}>
+                  <option value="">— select a department —</option>
+                  {departments.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           <button type="submit" className="btn-primary" style={{ width: 'auto', padding: '10px 22px' }} disabled={saving}>
             {saving ? 'Launching…' : 'Launch evaluation'}
@@ -211,7 +264,16 @@ export default function EvaluationManager({ profile, onChanged, refreshKey }) {
             <tr key={ev.id}>
               <td>{ev.trainings?.title || '—'}</td>
               <td>L{ev.level} — {LEVELS[ev.level]?.name}</td>
-              <td style={{ textTransform: 'capitalize' }}>{ev.scope}</td>
+              <td style={{ textTransform: 'capitalize' }}>
+                {ev.scope}
+                {ev.scope_ref ? (
+                  <div className="field-hint" style={{ marginTop: 2 }}>
+                    {ev.scope === 'employee'
+                      ? employees.find((e) => e.id === ev.scope_ref)?.full_name || 'employee'
+                      : ev.scope_ref}
+                  </div>
+                ) : null}
+              </td>
               <td style={{ textAlign: 'center' }}>
                 <span className="count-chip">{responseCounts[ev.id] || 0}</span>
               </td>
