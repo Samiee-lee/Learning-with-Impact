@@ -3,9 +3,17 @@ import { NextResponse } from 'next/server';
 // Runs server-side on Vercel. The Anthropic key never reaches the browser.
 export const runtime = 'nodejs';
 
+const LEVEL_GUIDANCE = {
+  1: 'Reaction — how participants felt about the training. Use "rating" for satisfaction/recommendation and "text" for open reflection.',
+  2: 'Learning — what knowledge or skill was gained. Use "scenario" for an applied situation and "confidence" for self-rated capability.',
+  3: 'Behaviour — whether behaviour changed on the job. Use "text" asking for concrete application and supporting evidence.',
+  4: 'Results — what business impact resulted. Use "rating" for observed impact and "text" for the KPI influenced.',
+};
+
 export async function POST(request) {
   try {
-    const { kind, data } = await request.json();
+    const body = await request.json();
+    const { kind, data } = body;
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
@@ -17,6 +25,7 @@ export async function POST(request) {
 
     let system = '';
     let userContent = '';
+    let maxTokens = 400;
 
     if (kind === 'insight') {
       system =
@@ -27,6 +36,26 @@ export async function POST(request) {
         'Plain prose only — no markdown, no headings, no bullet points.';
       userContent =
         'Current learning-evaluation data:\n' + (data || '(no data)') + '\n\nWrite the executive insight now.';
+    } else if (kind === 'questions') {
+      const level = Number(data?.level) || 1;
+      maxTokens = 900;
+      system =
+        'You design Kirkpatrick-model training evaluation questions for an enterprise L&D team.\n' +
+        `You are writing LEVEL ${level}: ${LEVEL_GUIDANCE[level] || ''}\n\n` +
+        'Rules:\n' +
+        '- Write 3 to 5 questions, tailored specifically to the training objective given.\n' +
+        '- Each question_type MUST be exactly one of: "rating", "text", "scenario", "confidence".\n' +
+        '- "rating" and "confidence" are answered on a 1-5 scale, so phrase them so a 1-5 answer makes sense.\n' +
+        '- "text" and "scenario" are answered in prose.\n' +
+        '- Be concrete and specific to the objective. Avoid generic filler.\n\n' +
+        'Respond with ONLY a JSON array, no preamble, no markdown, no code fences. Format:\n' +
+        '[{"question_text":"...","question_type":"rating"}]';
+      userContent =
+        `Training title: ${data?.title || '(untitled)'}\n` +
+        `One-line objective: ${data?.objective || '(none given)'}\n` +
+        `Strategic goal (WIG): ${data?.wig || '(none)'}\n` +
+        `Target audience: ${data?.audience || '(not specified)'}\n\n` +
+        `Write the Level ${level} questions now as a JSON array.`;
     } else {
       return NextResponse.json({ error: 'Unknown request type.' }, { status: 400 });
     }
@@ -40,7 +69,7 @@ export async function POST(request) {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400,
+        max_tokens: maxTokens,
         system,
         messages: [{ role: 'user', content: userContent }],
       }),
@@ -56,6 +85,38 @@ export async function POST(request) {
 
     const json = await resp.json();
     const text = (json.content || []).map((b) => b.text || '').join('').trim();
+
+    if (kind === 'questions') {
+      // Strip any stray code fences, then parse defensively.
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      let parsed;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (e) {
+        return NextResponse.json(
+          { error: 'The AI returned an unexpected format. Please try again.' },
+          { status: 502 }
+        );
+      }
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        return NextResponse.json({ error: 'The AI returned no questions. Please try again.' }, { status: 502 });
+      }
+
+      const allowed = ['rating', 'text', 'scenario', 'confidence'];
+      const questions = parsed
+        .filter((q) => q && typeof q.question_text === 'string' && q.question_text.trim())
+        .map((q) => ({
+          question_text: String(q.question_text).trim(),
+          question_type: allowed.includes(q.question_type) ? q.question_type : 'text',
+        }))
+        .slice(0, 6);
+
+      if (!questions.length) {
+        return NextResponse.json({ error: 'The AI returned no usable questions.' }, { status: 502 });
+      }
+      return NextResponse.json({ questions });
+    }
+
     return NextResponse.json({ text });
   } catch (e) {
     return NextResponse.json({ error: 'Server error: ' + (e?.message || 'unknown') }, { status: 500 });

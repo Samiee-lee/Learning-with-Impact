@@ -4,7 +4,10 @@ import { Fragment, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { pretty } from '../lib/format';
 
-const EMPTY = { title: '', objective: '', ttype: 'internal', wigId: '', audience: '', status: 'draft' };
+const EMPTY = {
+  title: '', objective: '', ttype: 'internal', wigId: '', audience: '', status: 'draft',
+  deliveryMode: 'physical', facilitator: '', facilitatorKind: 'individual',
+};
 
 export default function TrainingsManager({ profile, onChanged, refreshKey }) {
   const [loading, setLoading] = useState(true);
@@ -29,7 +32,7 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
   async function loadData() {
     const { data: tr } = await supabase
       .from('trainings')
-      .select('id, title, one_line_objective, training_type, status, target_audience, wig_id, wigs(name)')
+      .select('id, title, one_line_objective, training_type, status, target_audience, wig_id, delivery_mode, facilitator, facilitator_kind, wigs(name)')
       .order('created_at', { ascending: true });
     setTrainings(tr || []);
 
@@ -74,6 +77,9 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
       wigId: t.wig_id || '',
       audience: t.target_audience || '',
       status: t.status || 'draft',
+      deliveryMode: t.delivery_mode || 'physical',
+      facilitator: t.facilitator || '',
+      facilitatorKind: t.facilitator_kind || 'individual',
     });
     setMsg('');
     setFormOpen(true);
@@ -103,6 +109,9 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
       wig_id: form.wigId || null,
       target_audience: form.audience.trim() || null,
       status: form.status,
+      delivery_mode: form.deliveryMode,
+      facilitator: form.facilitator.trim() || null,
+      facilitator_kind: form.facilitator.trim() ? form.facilitatorKind : null,
     };
 
     let error;
@@ -222,6 +231,34 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
                 <option value="completed">Completed</option>
               </select>
             </div>
+            <div className="field">
+              <label>Delivery mode</label>
+              <select value={form.deliveryMode} onChange={(e) => setField('deliveryMode', e.target.value)}>
+                <option value="physical">Physical</option>
+                <option value="virtual">Virtual</option>
+                <option value="blended">Blended</option>
+              </select>
+              <div className="field-hint">Platform questions appear on Level 1 for virtual/blended only.</div>
+            </div>
+            <div className="field">
+              <label>Facilitator / institution</label>
+              <input
+                value={form.facilitator}
+                onChange={(e) => setField('facilitator', e.target.value)}
+                placeholder="e.g. Dolapo Fasuyi, or Fitch Learning"
+              />
+            </div>
+            <div className="field">
+              <label>Facilitator type</label>
+              <select
+                value={form.facilitatorKind}
+                onChange={(e) => setField('facilitatorKind', e.target.value)}
+                disabled={!form.facilitator.trim()}
+              >
+                <option value="individual">Individual</option>
+                <option value="institution">Institution</option>
+              </select>
+            </div>
           </div>
           <button type="submit" className="btn-primary" style={{ width: 'auto', padding: '10px 22px' }} disabled={saving}>
             {saving ? 'Saving…' : editingId ? 'Save changes' : 'Save training'}
@@ -232,7 +269,7 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
       <table>
         <thead>
           <tr>
-            <th>Title</th><th>Type</th><th>WIG</th>
+            <th>Title</th><th>Type</th><th>Facilitator</th><th>WIG</th>
             <th style={{ textAlign: 'center' }}>Participants</th>
             <th>Status</th>
             <th style={{ textAlign: 'right' }}>Actions</th>
@@ -246,7 +283,13 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
               <Fragment key={t.id}>
                 <tr>
                   <td>{t.title}</td>
-                  <td style={{ textTransform: 'capitalize' }}>{t.training_type}</td>
+                  <td style={{ textTransform: 'capitalize' }}>
+                    {t.training_type}
+                    <div className="field-hint" style={{ marginTop: 2 }}>{t.delivery_mode || 'physical'}</div>
+                  </td>
+                  <td>
+                    {t.facilitator || <span style={{ color: 'var(--muted)' }}>—</span>}
+                  </td>
                   <td>{pretty(t.wigs?.name)}</td>
                   <td style={{ textAlign: 'center' }}>
                     <button className="link-btn" onClick={() => toggleParticipants(t.id)}>
@@ -264,7 +307,7 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
                 </tr>
                 {isOpen && (
                   <tr>
-                    <td colSpan={6} className="detail-cell">
+                    <td colSpan={7} className="detail-cell">
                       <div className="detail-box">
                         <div className="detail-title">
                           Who attended “{t.title}”
@@ -302,7 +345,7 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
             );
           })}
           {trainings.length === 0 && (
-            <tr><td colSpan={6} className="empty">No trainings yet. Click “Register training”.</td></tr>
+            <tr><td colSpan={7} className="empty">No trainings yet. Click “Register training”.</td></tr>
           )}
         </tbody>
       </table>
