@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient';
 import AiInsightCard from './AiInsightCard';
 import TrainingsManager from './TrainingsManager';
 import WigManager from './WigManager';
+import EvaluationManager from './EvaluationManager';
 
 export default function AdminDashboard({ profile }) {
   const [loading, setLoading] = useState(true);
@@ -88,6 +89,12 @@ export default function AdminDashboard({ profile }) {
           Trainings
         </button>
         <button
+          className={`tab ${tab === 'evaluations' ? 'active' : ''}`}
+          onClick={() => setTab('evaluations')}
+        >
+          Evaluations
+        </button>
+        <button
           className={`tab ${tab === 'wigs' ? 'active' : ''}`}
           onClick={() => setTab('wigs')}
         >
@@ -96,11 +103,13 @@ export default function AdminDashboard({ profile }) {
       </div>
 
       <div style={{ marginBottom: 20 }}>
-        {tab === 'trainings' ? (
+        {tab === 'trainings' && (
           <TrainingsManager profile={profile} onChanged={handleChanged} refreshKey={refreshKey} />
-        ) : (
-          <WigManager profile={profile} onChanged={handleChanged} />
         )}
+        {tab === 'evaluations' && (
+          <EvaluationManager profile={profile} onChanged={handleChanged} refreshKey={refreshKey} />
+        )}
+        {tab === 'wigs' && <WigManager profile={profile} onChanged={handleChanged} />}
       </div>
 
       <AiInsightCard initialInsight={insight} profileId={profile.id} summary={aiSummary} />
