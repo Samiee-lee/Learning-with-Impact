@@ -1,204 +1,118 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { pretty } from '../lib/format';
+import AiInsightCard from './AiInsightCard';
+import TrainingsManager from './TrainingsManager';
+import WigManager from './WigManager';
+import EvaluationManager from './EvaluationManager';
 
-const EMPTY = { name: '', description: '' };
-
-export default function WigManager({ profile, onChanged }) {
+export default function AdminDashboard({ profile }) {
   const [loading, setLoading] = useState(true);
-  const [wigs, setWigs] = useState([]);
-  const [counts, setCounts] = useState({}); // wig_id -> number of linked trainings
+  const [tab, setTab] = useState('trainings');
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const [formOpen, setFormOpen] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState(EMPTY);
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [stats, setStats] = useState({ trainings: 0, wigs: 0, evals: 0, responses: 0 });
+  const [aiSummary, setAiSummary] = useState('');
+  const [insight, setInsight] = useState('');
 
-  function setField(k, v) {
-    setForm((f) => ({ ...f, [k]: v }));
-  }
+  const loadOverview = useCallback(async () => {
+    const { data: tr } = await supabase
+      .from('trainings')
+      .select('title, status, wigs(name)');
 
-  async function loadData() {
-    const { data: w } = await supabase
-      .from('wigs')
-      .select('id, name, description')
-      .order('name');
-    setWigs(w || []);
+    const [wigRes, evalRes, respRes] = await Promise.all([
+      supabase.from('wigs').select('*', { count: 'exact', head: true }),
+      supabase.from('evaluations').select('*', { count: 'exact', head: true }),
+      supabase.from('evaluation_responses').select('*', { count: 'exact', head: true }),
+    ]);
 
-    // How many trainings point at each WIG (so we can warn before deleting)
-    const { data: tr } = await supabase.from('trainings').select('wig_id');
-    const c = {};
-    (tr || []).forEach((t) => {
-      if (t.wig_id) c[t.wig_id] = (c[t.wig_id] || 0) + 1;
-    });
-    setCounts(c);
+    const next = {
+      trainings: (tr || []).length,
+      wigs: wigRes.count || 0,
+      evals: evalRes.count || 0,
+      responses: respRes.count || 0,
+    };
+    setStats(next);
+
+    setAiSummary(
+      `Trainings: ${next.trainings}; Strategic WIGs: ${next.wigs}; ` +
+        `Evaluations launched: ${next.evals}; Responses collected: ${next.responses}. ` +
+        `Programmes: ${(tr || [])
+          .map((t) => `${t.title} [${t.status}, WIG: ${t.wigs?.name || 'none'}]`)
+          .join('; ')}.`
+    );
+
+    const { data: ins } = await supabase
+      .from('ai_insights')
+      .select('content')
+      .eq('scope_type', 'executive')
+      .order('generated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setInsight(ins?.content || '');
 
     setLoading(false);
-  }
-
-  useEffect(() => {
-    loadData();
   }, []);
 
-  function openCreate() {
-    setEditingId(null);
-    setForm(EMPTY);
-    setMsg('');
-    setFormOpen(true);
-  }
+  useEffect(() => {
+    loadOverview();
+  }, [loadOverview]);
 
-  function startEdit(w) {
-    setEditingId(w.id);
-    setForm({ name: w.name || '', description: w.description || '' });
-    setMsg('');
-    setFormOpen(true);
-  }
-
-  function closeForm() {
-    setFormOpen(false);
-    setEditingId(null);
-    setForm(EMPTY);
-    setMsg('');
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setMsg('');
-    if (!form.name.trim()) {
-      setMsg('A goal name is required.');
-      return;
-    }
-    setSaving(true);
-
-    const payload = {
-      name: form.name.trim(),
-      description: form.description.trim() || null,
-    };
-
-    let error;
-    if (editingId) {
-      ({ error } = await supabase.from('wigs').update(payload).eq('id', editingId));
-    } else {
-      ({ error } = await supabase.from('wigs').insert({ ...payload, created_by: profile.id }));
-    }
-
-    setSaving(false);
-    if (error) {
-      setMsg('Could not save: ' + error.message);
-      return;
-    }
-    closeForm();
-    await loadData();
-    if (onChanged) onChanged();
-  }
-
-  async function handleDelete(w) {
-    const linked = counts[w.id] || 0;
-
-    if (linked > 0) {
-      alert(
-        `"${w.name}" cannot be deleted yet.\n\n` +
-          `${linked} training${linked === 1 ? ' is' : 's are'} still linked to this goal. ` +
-          `Re-assign or delete those trainings first, then try again.`
-      );
-      return;
-    }
-
-    const ok =
-      typeof window !== 'undefined' &&
-      window.confirm(`Delete the strategic goal "${w.name}"?\n\nThis cannot be undone.`);
-    if (!ok) return;
-
-    const { error } = await supabase.from('wigs').delete().eq('id', w.id);
-    if (error) {
-      alert('Could not delete: ' + error.message);
-      return;
-    }
-    await loadData();
-    if (onChanged) onChanged();
+  // Called by child managers after any create/edit/delete
+  function handleChanged() {
+    loadOverview();
+    setRefreshKey((k) => k + 1);
   }
 
   if (loading) return <div className="center-note">Loading…</div>;
 
   return (
-    <div className="card">
-      <div className="card-head">
-        <h2>Strategic goals (WIGs)</h2>
-        {formOpen ? (
-          <button className="btn-small" onClick={closeForm}>Cancel</button>
-        ) : (
-          <button className="btn-small" onClick={openCreate}>+ Add goal</button>
-        )}
+    <div className="page">
+      <div className="welcome">
+        <h1>Admin console</h1>
+        <p>Manage trainings, strategic goals and reporting for the organisation.</p>
       </div>
 
-      {formOpen && (
-        <form onSubmit={handleSubmit} className="inline-form">
-          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>
-            {editingId ? 'Edit goal' : 'New strategic goal'}
-          </div>
-          {msg ? <div className="login-error" style={{ marginBottom: 14 }}>{msg}</div> : null}
-          <div className="form-grid">
-            <div className="field field-wide">
-              <label>Goal name</label>
-              <input
-                value={form.name}
-                onChange={(e) => setField('name', e.target.value)}
-                placeholder="e.g. Reduce Fraud & Underwriting Losses"
-              />
-            </div>
-            <div className="field field-wide">
-              <label>Description</label>
-              <input
-                value={form.description}
-                onChange={(e) => setField('description', e.target.value)}
-                placeholder="What does achieving this goal look like?"
-              />
-            </div>
-          </div>
-          <button
-            type="submit"
-            className="btn-primary"
-            style={{ width: 'auto', padding: '10px 22px' }}
-            disabled={saving}
-          >
-            {saving ? 'Saving…' : editingId ? 'Save changes' : 'Save goal'}
-          </button>
-        </form>
-      )}
+      <div className="stats">
+        <div className="stat"><div className="value">{stats.trainings}</div><div className="label">Trainings</div></div>
+        <div className="stat"><div className="value">{stats.wigs}</div><div className="label">Strategic WIGs</div></div>
+        <div className="stat"><div className="value">{stats.evals}</div><div className="label">Evaluations launched</div></div>
+        <div className="stat"><div className="value">{stats.responses}</div><div className="label">Responses collected</div></div>
+      </div>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Goal</th>
-            <th>Description</th>
-            <th style={{ textAlign: 'center' }}>Trainings</th>
-            <th style={{ textAlign: 'right' }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {wigs.map((w) => (
-            <tr key={w.id}>
-              <td style={{ fontWeight: 600 }}>{pretty(w.name)}</td>
-              <td style={{ color: 'var(--muted)' }}>{w.description || '—'}</td>
-              <td style={{ textAlign: 'center' }}>
-                <span className="count-chip">{counts[w.id] || 0}</span>
-              </td>
-              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                <button className="link-btn" onClick={() => startEdit(w)}>Edit</button>
-                <button className="link-btn danger" onClick={() => handleDelete(w)}>Delete</button>
-              </td>
-            </tr>
-          ))}
-          {wigs.length === 0 && (
-            <tr>
-              <td colSpan={4} className="empty">No strategic goals yet. Click “Add goal”.</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      <div className="tabs">
+        <button
+          className={`tab ${tab === 'trainings' ? 'active' : ''}`}
+          onClick={() => setTab('trainings')}
+        >
+          Trainings
+        </button>
+        <button
+          className={`tab ${tab === 'evaluations' ? 'active' : ''}`}
+          onClick={() => setTab('evaluations')}
+        >
+          Evaluations
+        </button>
+        <button
+          className={`tab ${tab === 'wigs' ? 'active' : ''}`}
+          onClick={() => setTab('wigs')}
+        >
+          Strategic goals
+        </button>
+      </div>
+
+      <div style={{ marginBottom: 20 }}>
+        {tab === 'trainings' && (
+          <TrainingsManager profile={profile} onChanged={handleChanged} refreshKey={refreshKey} />
+        )}
+        {tab === 'evaluations' && (
+          <EvaluationManager profile={profile} onChanged={handleChanged} refreshKey={refreshKey} />
+        )}
+        {tab === 'wigs' && <WigManager profile={profile} onChanged={handleChanged} />}
+      </div>
+
+      <AiInsightCard initialInsight={insight} profileId={profile.id} summary={aiSummary} />
     </div>
   );
 }

@@ -1,214 +1,204 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { pretty } from '../lib/format';
 
-export default function ManagerDashboard({ profile }) {
+const EMPTY = { name: '', description: '' };
+
+export default function WigManager({ profile, onChanged }) {
   const [loading, setLoading] = useState(true);
-  const [team, setTeam] = useState([]);
-  const [validations, setValidations] = useState([]);
-  const [openId, setOpenId] = useState(null);   // which validation is expanded
-  const [comments, setComments] = useState({}); // validation_id -> comment text
+  const [wigs, setWigs] = useState([]);
+  const [counts, setCounts] = useState({}); // wig_id -> number of linked trainings
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState('');
+  const [msg, setMsg] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-
-    const { data: reports } = await supabase
-      .from('profiles')
-      .select('id, full_name, department')
-      .eq('manager_id', profile.id);
-    setTeam(reports || []);
-
-    const { data: vals } = await supabase
-      .from('manager_validations')
-      .select(
-        'id, validated, comments, response_id, ' +
-          'evaluation_responses(id, respondent_id, profiles(full_name), evaluations(level, trainings(title)))'
-      )
-      .eq('validator_id', profile.id);
-    setValidations(vals || []);
-
-    setLoading(false);
-  }, [profile.id]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  // Load the employee's actual answers when a row is expanded
-  const [answers, setAnswers] = useState({}); // response_id -> [{q, a}]
-  async function toggleOpen(v) {
-    if (openId === v.id) {
-      setOpenId(null);
-      return;
-    }
-    setOpenId(v.id);
-    const rid = v.response_id;
-    if (!answers[rid]) {
-      const { data } = await supabase
-        .from('response_answers')
-        .select('answer_text, answer_numeric, evaluation_questions(question_text, question_order)')
-        .eq('response_id', rid);
-      const sorted = (data || []).sort(
-        (a, b) => (a.evaluation_questions?.question_order || 0) - (b.evaluation_questions?.question_order || 0)
-      );
-      setAnswers((prev) => ({ ...prev, [rid]: sorted }));
-    }
+  function setField(k, v) {
+    setForm((f) => ({ ...f, [k]: v }));
   }
 
-  async function handleValidate(v) {
-    setSaving(true);
-    const { error } = await supabase
-      .from('manager_validations')
-      .update({
-        validated: true,
-        comments: (comments[v.id] || '').trim() || null,
-        validated_at: new Date().toISOString(),
-      })
-      .eq('id', v.id);
-    setSaving(false);
+  async function loadData() {
+    const { data: w } = await supabase
+      .from('wigs')
+      .select('id, name, description')
+      .order('name');
+    setWigs(w || []);
 
-    if (error) {
-      alert('Could not save: ' + error.message);
+    // How many trainings point at each WIG (so we can warn before deleting)
+    const { data: tr } = await supabase.from('trainings').select('wig_id');
+    const c = {};
+    (tr || []).forEach((t) => {
+      if (t.wig_id) c[t.wig_id] = (c[t.wig_id] || 0) + 1;
+    });
+    setCounts(c);
+
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  function openCreate() {
+    setEditingId(null);
+    setForm(EMPTY);
+    setMsg('');
+    setFormOpen(true);
+  }
+
+  function startEdit(w) {
+    setEditingId(w.id);
+    setForm({ name: w.name || '', description: w.description || '' });
+    setMsg('');
+    setFormOpen(true);
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    setEditingId(null);
+    setForm(EMPTY);
+    setMsg('');
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setMsg('');
+    if (!form.name.trim()) {
+      setMsg('A goal name is required.');
       return;
     }
-    setOpenId(null);
-    setToast('Behaviour change validated.');
-    await load();
-    setTimeout(() => setToast(''), 4000);
+    setSaving(true);
+
+    const payload = {
+      name: form.name.trim(),
+      description: form.description.trim() || null,
+    };
+
+    let error;
+    if (editingId) {
+      ({ error } = await supabase.from('wigs').update(payload).eq('id', editingId));
+    } else {
+      ({ error } = await supabase.from('wigs').insert({ ...payload, created_by: profile.id }));
+    }
+
+    setSaving(false);
+    if (error) {
+      setMsg('Could not save: ' + error.message);
+      return;
+    }
+    closeForm();
+    await loadData();
+    if (onChanged) onChanged();
+  }
+
+  async function handleDelete(w) {
+    const linked = counts[w.id] || 0;
+
+    if (linked > 0) {
+      alert(
+        `"${w.name}" cannot be deleted yet.\n\n` +
+          `${linked} training${linked === 1 ? ' is' : 's are'} still linked to this goal. ` +
+          `Re-assign or delete those trainings first, then try again.`
+      );
+      return;
+    }
+
+    const ok =
+      typeof window !== 'undefined' &&
+      window.confirm(`Delete the strategic goal "${w.name}"?\n\nThis cannot be undone.`);
+    if (!ok) return;
+
+    const { error } = await supabase.from('wigs').delete().eq('id', w.id);
+    if (error) {
+      alert('Could not delete: ' + error.message);
+      return;
+    }
+    await loadData();
+    if (onChanged) onChanged();
   }
 
   if (loading) return <div className="center-note">Loading…</div>;
 
-  const pending = validations.filter((v) => !v.validated);
-
   return (
-    <div className="page">
-      <div className="welcome">
-        <h1>Team overview</h1>
-        <p>Your direct reports and the behaviour changes awaiting your validation.</p>
-      </div>
-
-      {toast ? <div className="toast">{toast}</div> : null}
-
-      <div className="stats">
-        <div className="stat"><div className="value">{team.length}</div><div className="label">Team members</div></div>
-        <div className="stat"><div className="value">{validations.length}</div><div className="label">Validation requests</div></div>
-        <div className="stat"><div className="value">{pending.length}</div><div className="label">Pending validation</div></div>
-      </div>
-
-      <div className="card" style={{ marginBottom: 20 }}>
-        <h2>Behaviour validations</h2>
-        {validations.length === 0 ? (
-          <div className="empty">No validation requests yet.</div>
+    <div className="card">
+      <div className="card-head">
+        <h2>Strategic goals (WIGs)</h2>
+        {formOpen ? (
+          <button className="btn-small" onClick={closeForm}>Cancel</button>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Team member</th><th>Training</th><th>Status</th>
-                <th style={{ textAlign: 'right' }}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {validations.map((v) => {
-                const resp = v.evaluation_responses;
-                const rid = v.response_id;
-                const isOpen = openId === v.id;
-                return (
-                  <Fragment key={v.id}>
-                    <tr>
-                      <td>{resp?.profiles?.full_name || '—'}</td>
-                      <td>{resp?.evaluations?.trainings?.title || '—'}</td>
-                      <td>
-                        {v.validated
-                          ? <span className="pill completed">Validated</span>
-                          : <span className="pill pending">Pending</span>}
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <button className="link-btn" onClick={() => toggleOpen(v)}>
-                          {isOpen ? 'Hide' : v.validated ? 'View' : 'Review'}
-                        </button>
-                      </td>
-                    </tr>
-                    {isOpen && (
-                      <tr>
-                        <td colSpan={4} className="detail-cell">
-                          <div className="detail-box">
-                            <div className="detail-title">What they reported</div>
-                            {(answers[rid] || []).length === 0 ? (
-                              <div className="empty" style={{ padding: '6px 0' }}>Loading answers…</div>
-                            ) : (
-                              (answers[rid] || []).map((a, i) => (
-                                <div key={i} className="qa">
-                                  <div className="qa-q">{a.evaluation_questions?.question_text}</div>
-                                  <div className="qa-a">
-                                    {a.answer_text || (a.answer_numeric != null ? `${a.answer_numeric} / 5` : '—')}
-                                  </div>
-                                </div>
-                              ))
-                            )}
-
-                            {v.validated ? (
-                              v.comments ? (
-                                <div className="qa" style={{ marginTop: 12 }}>
-                                  <div className="qa-q">Your comment</div>
-                                  <div className="qa-a">{v.comments}</div>
-                                </div>
-                              ) : null
-                            ) : (
-                              <div style={{ marginTop: 14 }}>
-                                <div className="detail-title">Your validation</div>
-                                <textarea
-                                  className="answer-text"
-                                  rows={3}
-                                  placeholder="Confirm what you have observed on the job (optional)…"
-                                  value={comments[v.id] || ''}
-                                  onChange={(e) =>
-                                    setComments((c) => ({ ...c, [v.id]: e.target.value }))
-                                  }
-                                />
-                                <button
-                                  className="btn-primary"
-                                  style={{ width: 'auto', padding: '10px 22px' }}
-                                  onClick={() => handleValidate(v)}
-                                  disabled={saving}
-                                >
-                                  {saving ? 'Saving…' : 'Confirm behaviour change'}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
+          <button className="btn-small" onClick={openCreate}>+ Add goal</button>
         )}
       </div>
 
-      <div className="card">
-        <h2>Your team</h2>
-        {team.length === 0 ? (
-          <div className="empty">No direct reports assigned.</div>
-        ) : (
-          <table>
-            <thead><tr><th>Name</th><th>Department</th></tr></thead>
-            <tbody>
-              {team.map((m) => (
-                <tr key={m.id}>
-                  <td>{m.full_name}</td>
-                  <td>{m.department || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {formOpen && (
+        <form onSubmit={handleSubmit} className="inline-form">
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>
+            {editingId ? 'Edit goal' : 'New strategic goal'}
+          </div>
+          {msg ? <div className="login-error" style={{ marginBottom: 14 }}>{msg}</div> : null}
+          <div className="form-grid">
+            <div className="field field-wide">
+              <label>Goal name</label>
+              <input
+                value={form.name}
+                onChange={(e) => setField('name', e.target.value)}
+                placeholder="e.g. Reduce Fraud & Underwriting Losses"
+              />
+            </div>
+            <div className="field field-wide">
+              <label>Description</label>
+              <input
+                value={form.description}
+                onChange={(e) => setField('description', e.target.value)}
+                placeholder="What does achieving this goal look like?"
+              />
+            </div>
+          </div>
+          <button
+            type="submit"
+            className="btn-primary"
+            style={{ width: 'auto', padding: '10px 22px' }}
+            disabled={saving}
+          >
+            {saving ? 'Saving…' : editingId ? 'Save changes' : 'Save goal'}
+          </button>
+        </form>
+      )}
+
+      <table>
+        <thead>
+          <tr>
+            <th>Goal</th>
+            <th>Description</th>
+            <th style={{ textAlign: 'center' }}>Trainings</th>
+            <th style={{ textAlign: 'right' }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {wigs.map((w) => (
+            <tr key={w.id}>
+              <td style={{ fontWeight: 600 }}>{pretty(w.name)}</td>
+              <td style={{ color: 'var(--muted)' }}>{w.description || '—'}</td>
+              <td style={{ textAlign: 'center' }}>
+                <span className="count-chip">{counts[w.id] || 0}</span>
+              </td>
+              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                <button className="link-btn" onClick={() => startEdit(w)}>Edit</button>
+                <button className="link-btn danger" onClick={() => handleDelete(w)}>Delete</button>
+              </td>
+            </tr>
+          ))}
+          {wigs.length === 0 && (
+            <tr>
+              <td colSpan={4} className="empty">No strategic goals yet. Click “Add goal”.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

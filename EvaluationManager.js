@@ -1,145 +1,113 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { pretty } from '../lib/format';
-import { LEVELS } from '../lib/evaluationConfig';
-import EvaluationForm from './EvaluationForm';
+import AiInsightCard from './AiInsightCard';
 
-export default function EmployeeDashboard({ profile }) {
+export default function ExecutiveDashboard({ profile }) {
   const [loading, setLoading] = useState(true);
-  const [myTrainings, setMyTrainings] = useState([]);
-  const [evals, setEvals] = useState([]);
-  const [completedCount, setCompletedCount] = useState(0);
-  const [active, setActive] = useState(null); // evaluation currently being taken
-  const [toast, setToast] = useState('');
-
-  const load = useCallback(async () => {
-    setLoading(true);
-
-    const { data: assigns } = await supabase
-      .from('training_assignments')
-      .select('training_id, trainings(id, title, status, wigs(name))')
-      .eq('employee_id', profile.id);
-
-    const trainings = (assigns || []).map((a) => a.trainings).filter(Boolean);
-    setMyTrainings(trainings);
-
-    const trainingIds = trainings.map((t) => t.id);
-
-    let launched = [];
-    if (trainingIds.length) {
-      const { data: ev } = await supabase
-        .from('evaluations')
-        .select('id, level, status, training_id, trainings(title)')
-        .in('training_id', trainingIds)
-        .eq('status', 'launched');
-      launched = ev || [];
-    }
-
-    const { data: myResp } = await supabase
-      .from('evaluation_responses')
-      .select('evaluation_id, status')
-      .eq('respondent_id', profile.id);
-
-    const submittedSet = new Set(
-      (myResp || []).filter((r) => r.status === 'submitted').map((r) => r.evaluation_id)
-    );
-    setCompletedCount(submittedSet.size);
-
-    setEvals(launched.map((ev) => ({ ...ev, done: submittedSet.has(ev.id) })));
-    setLoading(false);
-  }, [profile.id]);
+  const [wigRollup, setWigRollup] = useState([]); // [{ name, count }]
+  const [avgReaction, setAvgReaction] = useState(null);
+  const [impactScore, setImpactScore] = useState(null);
+  const [responses, setResponses] = useState(0);
+  const [insight, setInsight] = useState('');
 
   useEffect(() => {
-    load();
-  }, [load]);
+    async function load() {
+      // Trainings grouped by WIG (aggregate in JS)
+      const { data: tr } = await supabase.from('trainings').select('title, wigs(name)');
+      const counts = {};
+      (tr || []).forEach((t) => {
+        const name = t.wigs?.name || 'Unassigned';
+        counts[name] = (counts[name] || 0) + 1;
+      });
+      const rollup = Object.entries(counts)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+      setWigRollup(rollup);
 
-  async function handleDone() {
-    setActive(null);
-    setToast('Evaluation submitted. Thank you!');
-    await load();
-    setTimeout(() => setToast(''), 4000);
-  }
+      // Average reaction/learning rating across the org
+      const { data: ans } = await supabase
+        .from('response_answers')
+        .select('answer_numeric, evaluation_questions(question_type)');
+      const ratings = (ans || [])
+        .filter((a) => ['rating', 'confidence'].includes(a.evaluation_questions?.question_type) && a.answer_numeric != null)
+        .map((a) => Number(a.answer_numeric));
+      if (ratings.length) {
+        setAvgReaction((ratings.reduce((s, n) => s + n, 0) / ratings.length).toFixed(1));
+      }
+
+      // Business impact score (Level 4)
+      const { data: rm } = await supabase.from('results_metrics').select('ai_impact_score');
+      const scores = (rm || []).map((r) => Number(r.ai_impact_score)).filter((n) => !isNaN(n));
+      if (scores.length) {
+        setImpactScore((scores.reduce((s, n) => s + n, 0) / scores.length).toFixed(0));
+      }
+
+      const { count: respCount } = await supabase
+        .from('evaluation_responses')
+        .select('*', { count: 'exact', head: true });
+      setResponses(respCount || 0);
+
+      const { data: ins } = await supabase
+        .from('ai_insights')
+        .select('content')
+        .eq('scope_type', 'executive')
+        .order('generated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      setInsight(ins?.content || '');
+
+      setLoading(false);
+    }
+    load();
+  }, [profile.id]);
 
   if (loading) return <div className="center-note">Loading…</div>;
 
-  // Taking an evaluation replaces the dashboard view
-  if (active) {
-    return (
-      <div className="page">
-        <EvaluationForm
-          evaluation={active}
-          profile={profile}
-          onDone={handleDone}
-          onCancel={() => setActive(null)}
-        />
-      </div>
-    );
-  }
-
-  const pending = evals.filter((e) => !e.done);
+  const maxCount = Math.max(1, ...wigRollup.map((w) => w.count));
 
   return (
     <div className="page">
       <div className="welcome">
-        <h1>Your learning</h1>
-        <p>Trainings you're enrolled in and evaluations awaiting your input.</p>
+        <h1>Executive impact view</h1>
+        <p>How learning investment is tracking against strategic goals.</p>
       </div>
 
-      {toast ? <div className="toast">{toast}</div> : null}
-
       <div className="stats">
-        <div className="stat"><div className="value">{myTrainings.length}</div><div className="label">My trainings</div></div>
-        <div className="stat"><div className="value">{pending.length}</div><div className="label">Evaluations to complete</div></div>
-        <div className="stat"><div className="value">{completedCount}</div><div className="label">Completed</div></div>
+        <div className="stat"><div className="value">{avgReaction ?? '—'}<span className="unit">/5</span></div><div className="label">Avg learning rating</div></div>
+        <div className="stat"><div className="value">{impactScore ?? '—'}</div><div className="label">Business impact score</div></div>
+        <div className="stat"><div className="value">{responses}</div><div className="label">Responses collected</div></div>
+        <div className="stat"><div className="value">{wigRollup.length}</div><div className="label">WIGs in play</div></div>
       </div>
 
       <div className="grid">
         <div className="card">
-          <h2>Evaluations to complete</h2>
-          {pending.length === 0 ? (
-            <div className="empty">You're all caught up — nothing pending. 🎉</div>
-          ) : (
-            <table>
-              <thead>
-                <tr><th>Training</th><th>Level</th><th style={{ textAlign: 'right' }}>Action</th></tr>
-              </thead>
-              <tbody>
-                {pending.map((e) => (
-                  <tr key={e.id}>
-                    <td>{e.trainings?.title}</td>
-                    <td>Level {e.level} — {LEVELS[e.level]?.name}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="btn-small" onClick={() => setActive(e)}>Start</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <h2>Trainings by strategic goal (WIG)</h2>
+          <div className="bars">
+            {wigRollup.map((w, i) => (
+              <div className="bar-row" key={i}>
+                <div className="bar-label">{pretty(w.name)}</div>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${(w.count / maxCount) * 100}%` }} />
+                </div>
+                <div className="bar-value">{w.count}</div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div className="card">
-          <h2>My trainings</h2>
-          {myTrainings.length === 0 ? (
-            <div className="empty">No trainings assigned yet.</div>
-          ) : (
-            <table>
-              <thead>
-                <tr><th>Training</th><th>WIG</th></tr>
-              </thead>
-              <tbody>
-                {myTrainings.map((t) => (
-                  <tr key={t.id}>
-                    <td>{t.title}</td>
-                    <td>{pretty(t.wigs?.name)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        <AiInsightCard
+          initialInsight={insight}
+          profileId={profile.id}
+          summary={
+            `Average learning rating: ${avgReaction ?? 'n/a'}/5. ` +
+            `Business impact score: ${impactScore ?? 'n/a'}. ` +
+            `Responses collected: ${responses}. ` +
+            `Trainings per WIG: ${wigRollup.map((w) => `${w.name}: ${w.count}`).join('; ')}.`
+          }
+        />
       </div>
     </div>
   );
