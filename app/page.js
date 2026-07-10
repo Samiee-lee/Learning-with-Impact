@@ -27,7 +27,7 @@ export default function Home() {
 
       const { data: prof } = await supabase
         .from('profiles')
-        .select('id, full_name, role, department')
+        .select('id, full_name, role, department, manager_id')
         .eq('id', session.user.id)
         .maybeSingle();
 
