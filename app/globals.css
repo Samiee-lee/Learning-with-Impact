@@ -341,3 +341,31 @@ tr:last-child td { border-bottom: none; }
 .kind-tag.warn { background: #fff4e5; color: #b5651d; text-transform: none; }
 
 @media (max-width: 780px) { .level-cards { grid-template-columns: repeat(2, 1fr); } }
+
+/* ============ Phase 7b-2 — Drill-down charts ============ */
+.level-card.selectable { cursor: pointer; text-align: left; font-family: inherit; width: 100%; transition: transform .08s; }
+.level-card.selectable:hover { transform: translateY(-2px); }
+.level-card.selectable.active { box-shadow: 0 0 0 2px var(--brand) inset; }
+
+.drill-panel { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.drill-title { font-size: 13px; font-weight: 700; margin-bottom: 14px; }
+
+.callout {
+  margin-top: 14px; background: #fffaf3; border: 1px solid #f0d9b8; border-radius: 10px;
+  padding: 11px 14px; font-size: 13px; color: #7a4a12;
+}
+.callout strong { color: #5a3608; }
+
+.bar-fill.good { background: #1a7f43; }
+.bar-fill.mid  { background: #b5651d; }
+.bar-fill.low  { background: #b42318; }
+
+.donut-wrap { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; padding: 6px 0; }
+.donut-center { font-size: 22px; font-weight: 700; fill: var(--ink); }
+.donut-sub { font-size: 10px; fill: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.donut-legend { display: flex; flex-direction: column; gap: 8px; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #444; }
+.legend-item strong { color: var(--ink); margin-left: 2px; }
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+
+@media (max-width: 780px) { .donut-wrap { justify-content: center; } }
