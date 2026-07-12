@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { pretty } from '../lib/format';
+import { Donut, BarList } from './Charts';
 
-// Score → colour band (higher is always better; reverse questions were already inverted on save)
+const DIST_COLORS = ['#b42318', '#d1662a', '#e0a800', '#5aa469', '#1a7f43']; // scores 1..5
+
 function band(v, max) {
   if (v === null || v === undefined) return '';
   const pct = max === 100 ? v : (v / 5) * 100;
@@ -12,7 +13,6 @@ function band(v, max) {
   if (pct >= 55) return 'mid';
   return 'low';
 }
-
 function fmt(v) {
   return v === null || v === undefined ? '—' : v.toFixed(1);
 }
@@ -22,12 +22,18 @@ export default function ReportsManager() {
   const [levels, setLevels] = useState({});
   const [rows, setRows] = useState([]);
   const [facilitators, setFacilitators] = useState([]);
+  const [selected, setSelected] = useState(1);
+
+  const [l1Sections, setL1Sections] = useState([]);
+  const [l2Dist, setL2Dist] = useState([0, 0, 0, 0, 0]);
+  const [l4Dist, setL4Dist] = useState([0, 0, 0, 0, 0]);
+  const [l3Split, setL3Split] = useState({ validated: 0, pending: 0 });
 
   useEffect(() => {
     async function load() {
       const [evalsR, qsR, ansR, valR, respR, trR] = await Promise.all([
         supabase.from('evaluations').select('id, level, training_id'),
-        supabase.from('evaluation_questions').select('id, evaluation_id'),
+        supabase.from('evaluation_questions').select('id, evaluation_id, section'),
         supabase.from('response_answers').select('question_id, answer_numeric'),
         supabase.from('manager_validations').select('validated, response_id'),
         supabase.from('evaluation_responses').select('id, evaluation_id'),
@@ -37,7 +43,11 @@ export default function ReportsManager() {
       const evalById = {};
       (evalsR.data || []).forEach((e) => (evalById[e.id] = e));
       const qToEval = {};
-      (qsR.data || []).forEach((q) => (qToEval[q.id] = q.evaluation_id));
+      const qToSection = {};
+      (qsR.data || []).forEach((q) => {
+        qToEval[q.id] = q.evaluation_id;
+        qToSection[q.id] = q.section;
+      });
       const respToEval = {};
       (respR.data || []).forEach((r) => (respToEval[r.id] = r.evaluation_id));
       const trainingById = {};
@@ -50,33 +60,48 @@ export default function ReportsManager() {
         return perT[id];
       };
       const facAgg = {};
+      const sectionAgg = {};
+      const l2counts = [0, 0, 0, 0, 0];
+      const l4counts = [0, 0, 0, 0, 0];
 
       (ansR.data || []).forEach((a) => {
         if (a.answer_numeric === null || a.answer_numeric === undefined) return;
         const ev = evalById[qToEval[a.question_id]];
         if (!ev) return;
         const lvl = ev.level;
+        const val = Number(a.answer_numeric);
+
         if (lvl === 1 || lvl === 2 || lvl === 4) {
-          levelAgg[lvl].s += Number(a.answer_numeric);
+          levelAgg[lvl].s += val;
           levelAgg[lvl].n += 1;
           const t = ensureT(ev.training_id);
-          t[lvl].s += Number(a.answer_numeric);
+          t[lvl].s += val;
           t[lvl].n += 1;
+        }
 
-          if (lvl === 1) {
-            const tr = trainingById[ev.training_id];
-            const fac = tr && tr.facilitator;
-            if (fac) {
-              if (!facAgg[fac]) facAgg[fac] = { s: 0, n: 0, kind: tr.facilitator_kind || 'individual', set: new Set() };
-              facAgg[fac].s += Number(a.answer_numeric);
-              facAgg[fac].n += 1;
-              facAgg[fac].set.add(ev.training_id);
-            }
+        if (lvl === 1) {
+          const sec = qToSection[a.question_id] || 'Other';
+          if (!sectionAgg[sec]) sectionAgg[sec] = { s: 0, n: 0 };
+          sectionAgg[sec].s += val;
+          sectionAgg[sec].n += 1;
+
+          const tr = trainingById[ev.training_id];
+          const fac = tr && tr.facilitator;
+          if (fac) {
+            if (!facAgg[fac]) facAgg[fac] = { s: 0, n: 0, kind: tr.facilitator_kind || 'individual', set: new Set() };
+            facAgg[fac].s += val;
+            facAgg[fac].n += 1;
+            facAgg[fac].set.add(ev.training_id);
           }
         }
+
+        const idx = Math.min(5, Math.max(1, Math.round(val))) - 1;
+        if (lvl === 2) l2counts[idx] += 1;
+        if (lvl === 4) l4counts[idx] += 1;
       });
 
       let orgVal = { v: 0, t: 0 };
+      let split = { validated: 0, pending: 0 };
       (valR.data || []).forEach((v) => {
         const ev = evalById[respToEval[v.response_id]];
         if (!ev || ev.level !== 3) return;
@@ -86,6 +111,9 @@ export default function ReportsManager() {
         if (v.validated) {
           t[3].v += 1;
           orgVal.v += 1;
+          split.validated += 1;
+        } else {
+          split.pending += 1;
         }
       });
 
@@ -115,6 +143,18 @@ export default function ReportsManager() {
           .slice(0, 5)
       );
 
+      setL1Sections(
+        Object.entries(sectionAgg)
+          .map(([label, v]) => {
+            const value = v.s / v.n;
+            return { label, value, band: band(value, 5) };
+          })
+          .sort((a, b) => a.value - b.value)
+      );
+      setL2Dist(l2counts);
+      setL4Dist(l4counts);
+      setL3Split(split);
+
       setLoading(false);
     }
     load();
@@ -122,38 +162,84 @@ export default function ReportsManager() {
 
   if (loading) return <div className="center-note">Building reports…</div>;
 
+  const distSegments = (counts) => counts.map((v, i) => ({ label: `${i + 1} ★`, value: v, color: DIST_COLORS[i] }));
+
+  function DrillDown() {
+    if (selected === 1) {
+      const weakest = l1Sections[0];
+      return (
+        <div>
+          <div className="drill-title">Level 1 — average score by section</div>
+          <BarList items={l1Sections} max={5} />
+          {weakest && weakest.value < 4 && (
+            <div className="callout">
+              <strong>Area to improve:</strong> {weakest.label} is the weakest section at {weakest.value.toFixed(1)}/5.
+            </div>
+          )}
+        </div>
+      );
+    }
+    if (selected === 2) {
+      return (
+        <div>
+          <div className="drill-title">Level 2 — learning score distribution</div>
+          <Donut segments={distSegments(l2Dist)} center={levels[2] ? levels[2].avg.toFixed(1) : '—'} centerSub="avg /5" />
+        </div>
+      );
+    }
+    if (selected === 3) {
+      return (
+        <div>
+          <div className="drill-title">Level 3 — behaviour validation</div>
+          <Donut
+            segments={[
+              { label: 'Validated', value: l3Split.validated, color: '#1a7f43' },
+              { label: 'Pending', value: l3Split.pending, color: '#b5651d' },
+            ]}
+            center={levels[3] ? `${levels[3].rate}%` : '—'}
+            centerSub="validated"
+          />
+        </div>
+      );
+    }
+    return (
+      <div>
+        <div className="drill-title">Level 4 — impact score distribution</div>
+        <Donut segments={distSegments(l4Dist)} center={levels[4] ? levels[4].avg.toFixed(1) : '—'} centerSub="avg /5" />
+      </div>
+    );
+  }
+
+  const cardDef = [
+    { l: 1, name: 'L1 · Reaction', v: levels[1] ? levels[1].avg.toFixed(1) : '—', unit: '/5', n: levels[1]?.n, b: band(levels[1]?.avg, 5) },
+    { l: 2, name: 'L2 · Learning', v: levels[2] ? levels[2].avg.toFixed(1) : '—', unit: '/5', n: levels[2]?.n, b: band(levels[2]?.avg, 5) },
+    { l: 3, name: 'L3 · Behaviour', v: levels[3] ? levels[3].rate : '—', unit: '%', n: levels[3]?.n, b: band(levels[3]?.rate, 100) },
+    { l: 4, name: 'L4 · Results', v: levels[4] ? levels[4].avg.toFixed(1) : '—', unit: '/5', n: levels[4]?.n, b: band(levels[4]?.avg, 5) },
+  ];
+
   return (
     <div>
       <div className="card" style={{ marginBottom: 20 }}>
         <h2>Performance by evaluation level</h2>
         <div className="field-hint" style={{ marginBottom: 14 }}>
-          Where in the Kirkpatrick chain programmes are strong or failing. Higher is always better.
+          Click a level to drill into what’s driving it. Higher is always better.
         </div>
         <div className="level-cards">
-          <div className={`level-card ${band(levels[1]?.avg, 5)}`}>
-            <div className="lc-name">L1 · Reaction</div>
-            <div className="lc-value">{levels[1] ? `${levels[1].avg.toFixed(1)}` : '—'}<span className="lc-unit">/5</span></div>
-            <div className="lc-n">{levels[1] ? `${levels[1].n} answers` : 'no data'}</div>
-          </div>
-          <div className={`level-card ${band(levels[2]?.avg, 5)}`}>
-            <div className="lc-name">L2 · Learning</div>
-            <div className="lc-value">{levels[2] ? `${levels[2].avg.toFixed(1)}` : '—'}<span className="lc-unit">/5</span></div>
-            <div className="lc-n">{levels[2] ? `${levels[2].n} answers` : 'no data'}</div>
-          </div>
-          <div className={`level-card ${band(levels[3]?.rate, 100)}`}>
-            <div className="lc-name">L3 · Behaviour</div>
-            <div className="lc-value">{levels[3] ? `${levels[3].rate}` : '—'}<span className="lc-unit">%</span></div>
-            <div className="lc-n">{levels[3] ? `${levels[3].n} validated` : 'no data'}</div>
-          </div>
-          <div className={`level-card ${band(levels[4]?.avg, 5)}`}>
-            <div className="lc-name">L4 · Results</div>
-            <div className="lc-value">{levels[4] ? `${levels[4].avg.toFixed(1)}` : '—'}<span className="lc-unit">/5</span></div>
-            <div className="lc-n">{levels[4] ? `${levels[4].n} answers` : 'no data'}</div>
-          </div>
+          {cardDef.map((c) => (
+            <button
+              key={c.l}
+              className={`level-card selectable ${c.b} ${selected === c.l ? 'active' : ''}`}
+              onClick={() => setSelected(c.l)}
+            >
+              <div className="lc-name">{c.name}</div>
+              <div className="lc-value">{c.v}<span className="lc-unit">{c.unit}</span></div>
+              <div className="lc-n">{c.n ? `${c.n} ${c.l === 3 ? 'validated' : 'answers'}` : 'no data'}</div>
+            </button>
+          ))}
         </div>
-        <div className="field-hint" style={{ marginTop: 12 }}>
-          L1/L2/L4 are average scores out of 5. L3 is the share of reported behaviour changes a
-          manager has validated. A blank means that level hasn’t been run yet.
+
+        <div className="drill-panel">
+          <DrillDown />
         </div>
       </div>
 
@@ -186,9 +272,7 @@ export default function ReportsManager() {
 
       <div className="card">
         <h2>Top facilitators & institutions</h2>
-        <div className="field-hint" style={{ marginBottom: 12 }}>
-          Ranked by average Level 1 reaction score across their trainings.
-        </div>
+        <div className="field-hint" style={{ marginBottom: 12 }}>Ranked by average Level 1 reaction score.</div>
         {facilitators.length === 0 ? (
           <div className="empty">No facilitator data yet — add facilitator names to trainings and run Level 1.</div>
         ) : (
