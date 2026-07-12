@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { pretty } from '../lib/format';
+import KpiManager from './KpiManager';
 
 const EMPTY = { name: '', description: '' };
 
@@ -13,6 +14,7 @@ export default function WigManager({ profile, onChanged }) {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [openKpis, setOpenKpis] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -175,26 +177,43 @@ export default function WigManager({ profile, onChanged }) {
             <th>Goal</th>
             <th>Description</th>
             <th style={{ textAlign: 'center' }}>Trainings</th>
+            <th style={{ textAlign: 'center' }}>KPIs</th>
             <th style={{ textAlign: 'right' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
           {wigs.map((w) => (
-            <tr key={w.id}>
-              <td style={{ fontWeight: 600 }}>{pretty(w.name)}</td>
-              <td style={{ color: 'var(--muted)' }}>{w.description || '—'}</td>
-              <td style={{ textAlign: 'center' }}>
-                <span className="count-chip">{counts[w.id] || 0}</span>
-              </td>
-              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                <button className="link-btn" onClick={() => startEdit(w)}>Edit</button>
-                <button className="link-btn danger" onClick={() => handleDelete(w)}>Delete</button>
-              </td>
-            </tr>
+            <Fragment key={w.id}>
+              <tr>
+                <td style={{ fontWeight: 600 }}>{pretty(w.name)}</td>
+                <td style={{ color: 'var(--muted)' }}>{w.description || '—'}</td>
+                <td style={{ textAlign: 'center' }}>
+                  <span className="count-chip">{counts[w.id] || 0}</span>
+                </td>
+                <td style={{ textAlign: 'center' }}>
+                  <button className="link-btn" onClick={() => setOpenKpis(openKpis === w.id ? null : w.id)}>
+                    {openKpis === w.id ? 'Hide' : 'Manage'}
+                  </button>
+                </td>
+                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <button className="link-btn" onClick={() => startEdit(w)}>Edit</button>
+                  <button className="link-btn danger" onClick={() => handleDelete(w)}>Delete</button>
+                </td>
+              </tr>
+              {openKpis === w.id && (
+                <tr>
+                  <td colSpan={5} className="detail-cell">
+                    <div className="detail-box">
+                      <KpiManager wigId={w.id} profileId={profile.id} onChanged={onChanged} />
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
           {wigs.length === 0 && (
             <tr>
-              <td colSpan={4} className="empty">No strategic goals yet. Click “Add goal”.</td>
+              <td colSpan={5} className="empty">No strategic goals yet. Click “Add goal”.</td>
             </tr>
           )}
         </tbody>
