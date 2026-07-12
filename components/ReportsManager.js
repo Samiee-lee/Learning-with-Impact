@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Donut, BarList } from './Charts';
+import { downloadCSV, printView, today } from '../lib/exporters';
 
 const DIST_COLORS = ['#b42318', '#d1662a', '#e0a800', '#5aa469', '#1a7f43']; // scores 1..5
 
@@ -160,6 +161,35 @@ export default function ReportsManager() {
     load();
   }, []);
 
+  function exportCSV() {
+    const m = [];
+    m.push(['Learning With Impact by Evolution Academy — Report', today()]);
+    m.push([]);
+    m.push(['Performance by evaluation level']);
+    m.push(['Level', 'Metric']);
+    m.push(['L1 Reaction (avg/5)', levels[1] ? levels[1].avg.toFixed(1) : '—']);
+    m.push(['L2 Learning (avg/5)', levels[2] ? levels[2].avg.toFixed(1) : '—']);
+    m.push(['L3 Behaviour (% validated)', levels[3] ? levels[3].rate + '%' : '—']);
+    m.push(['L4 Results (avg/5)', levels[4] ? levels[4].avg.toFixed(1) : '—']);
+    m.push([]);
+    m.push(['Where each programme stands']);
+    m.push(['Training', 'L1', 'L2', 'L3 validated %', 'L4']);
+    rows.forEach((r) =>
+      m.push([
+        r.title,
+        r.l1 === null ? '' : r.l1.toFixed(1),
+        r.l2 === null ? '' : r.l2.toFixed(1),
+        r.l3 === null ? '' : r.l3 + '%',
+        r.l4 === null ? '' : r.l4.toFixed(1),
+      ])
+    );
+    m.push([]);
+    m.push(['Top facilitators & institutions']);
+    m.push(['#', 'Name', 'Type', 'Avg L1', 'Trainings', 'Responses']);
+    facilitators.forEach((f, i) => m.push([i + 1, f.name, f.kind, f.avg.toFixed(1), f.trainings, f.n]));
+    downloadCSV(`impact-report-${today()}.csv`, m);
+  }
+
   if (loading) return <div className="center-note">Building reports…</div>;
 
   const distSegments = (counts) => counts.map((v, i) => ({ label: `${i + 1} ★`, value: v, color: DIST_COLORS[i] }));
@@ -220,7 +250,13 @@ export default function ReportsManager() {
   return (
     <div>
       <div className="card" style={{ marginBottom: 20 }}>
-        <h2>Performance by evaluation level</h2>
+        <div className="card-head">
+          <h2>Performance by evaluation level</h2>
+          <div className="export-bar">
+            <button className="btn-small" onClick={exportCSV}>⬇ Export CSV</button>
+            <button className="btn-small" onClick={printView}>🖨 Print / PDF</button>
+          </div>
+        </div>
         <div className="field-hint" style={{ marginBottom: 14 }}>
           Click a level to drill into what’s driving it. Higher is always better.
         </div>
