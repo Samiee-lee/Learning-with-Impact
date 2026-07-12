@@ -401,3 +401,12 @@ tr:last-child td { border-bottom: none; }
   h1 { font-size: 18px; }
   @page { margin: 16mm; }
 }
+
+/* ============ Phase 9a — WIG KPIs ============ */
+.kpi-row { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; background: #fff; }
+.kpi-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.kpi-name { font-size: 13.5px; font-weight: 700; }
+.kpi-dir { font-size: 10px; font-weight: 600; color: var(--muted); margin-left: 8px; text-transform: uppercase; letter-spacing: .4px; }
+.kpi-figures { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12.5px; color: var(--muted); }
+.kpi-figures strong { color: var(--ink); }
+.kpi-att { margin-left: auto; font-weight: 700; color: var(--brand); }
