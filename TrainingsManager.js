@@ -1,118 +1,368 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import AiInsightCard from './AiInsightCard';
-import TrainingsManager from './TrainingsManager';
-import WigManager from './WigManager';
-import EvaluationManager from './EvaluationManager';
+import { pretty } from '../lib/format';
+import BulkTrainingUpload from './BulkTrainingUpload';
 
-export default function AdminDashboard({ profile }) {
+const EMPTY = {
+  title: '', objective: '', ttype: 'internal', wigId: '', audience: '', status: 'draft',
+  deliveryMode: 'physical', facilitator: '', facilitatorKind: 'individual',
+};
+
+export default function TrainingsManager({ profile, onChanged, refreshKey }) {
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('trainings');
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [trainings, setTrainings] = useState([]);
+  const [wigs, setWigs] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [assignments, setAssignments] = useState({}); // training_id -> Set(employee_id)
 
-  const [stats, setStats] = useState({ trainings: 0, wigs: 0, evals: 0, responses: 0 });
-  const [aiSummary, setAiSummary] = useState('');
-  const [insight, setInsight] = useState('');
+  const [formOpen, setFormOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [form, setForm] = useState(EMPTY);
 
-  const loadOverview = useCallback(async () => {
+  const [participantsFor, setParticipantsFor] = useState(null); // training id expanded
+  const [savingParticipants, setSavingParticipants] = useState(false);
+
+  function setField(key, value) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  async function loadData() {
     const { data: tr } = await supabase
       .from('trainings')
-      .select('title, status, wigs(name)');
+      .select('id, title, one_line_objective, training_type, status, target_audience, wig_id, delivery_mode, facilitator, facilitator_kind, wigs(name)')
+      .order('created_at', { ascending: true });
+    setTrainings(tr || []);
 
-    const [wigRes, evalRes, respRes] = await Promise.all([
-      supabase.from('wigs').select('*', { count: 'exact', head: true }),
-      supabase.from('evaluations').select('*', { count: 'exact', head: true }),
-      supabase.from('evaluation_responses').select('*', { count: 'exact', head: true }),
-    ]);
+    const { data: w } = await supabase.from('wigs').select('id, name').order('name');
+    setWigs(w || []);
 
-    const next = {
-      trainings: (tr || []).length,
-      wigs: wigRes.count || 0,
-      evals: evalRes.count || 0,
-      responses: respRes.count || 0,
-    };
-    setStats(next);
+    const { data: emp } = await supabase
+      .from('profiles')
+      .select('id, full_name, department')
+      .eq('role', 'employee')
+      .order('full_name');
+    setEmployees(emp || []);
 
-    setAiSummary(
-      `Trainings: ${next.trainings}; Strategic WIGs: ${next.wigs}; ` +
-        `Evaluations launched: ${next.evals}; Responses collected: ${next.responses}. ` +
-        `Programmes: ${(tr || [])
-          .map((t) => `${t.title} [${t.status}, WIG: ${t.wigs?.name || 'none'}]`)
-          .join('; ')}.`
-    );
-
-    const { data: ins } = await supabase
-      .from('ai_insights')
-      .select('content')
-      .eq('scope_type', 'executive')
-      .order('generated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    setInsight(ins?.content || '');
+    const { data: asg } = await supabase.from('training_assignments').select('training_id, employee_id');
+    const map = {};
+    (asg || []).forEach((a) => {
+      if (!map[a.training_id]) map[a.training_id] = new Set();
+      map[a.training_id].add(a.employee_id);
+    });
+    setAssignments(map);
 
     setLoading(false);
-  }, []);
+  }
 
   useEffect(() => {
-    loadOverview();
-  }, [loadOverview]);
+    loadData();
+  }, [refreshKey]);
 
-  // Called by child managers after any create/edit/delete
-  function handleChanged() {
-    loadOverview();
-    setRefreshKey((k) => k + 1);
+  function openCreate() {
+    setEditingId(null);
+    setForm(EMPTY);
+    setMsg('');
+    setFormOpen(true);
+  }
+
+  function startEdit(t) {
+    setEditingId(t.id);
+    setForm({
+      title: t.title || '',
+      objective: t.one_line_objective || '',
+      ttype: t.training_type || 'internal',
+      wigId: t.wig_id || '',
+      audience: t.target_audience || '',
+      status: t.status || 'draft',
+      deliveryMode: t.delivery_mode || 'physical',
+      facilitator: t.facilitator || '',
+      facilitatorKind: t.facilitator_kind || 'individual',
+    });
+    setMsg('');
+    setFormOpen(true);
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    setEditingId(null);
+    setForm(EMPTY);
+    setMsg('');
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setMsg('');
+    if (!form.title.trim() || !form.objective.trim()) {
+      setMsg('Title and objective are required.');
+      return;
+    }
+    setSaving(true);
+
+    const payload = {
+      title: form.title.trim(),
+      one_line_objective: form.objective.trim(),
+      training_type: form.ttype,
+      wig_id: form.wigId || null,
+      target_audience: form.audience.trim() || null,
+      status: form.status,
+      delivery_mode: form.deliveryMode,
+      facilitator: form.facilitator.trim() || null,
+      facilitator_kind: form.facilitator.trim() ? form.facilitatorKind : null,
+    };
+
+    let error;
+    if (editingId) {
+      ({ error } = await supabase.from('trainings').update(payload).eq('id', editingId));
+    } else {
+      ({ error } = await supabase.from('trainings').insert({ ...payload, created_by: profile.id }));
+    }
+
+    setSaving(false);
+    if (error) {
+      setMsg('Could not save: ' + error.message);
+      return;
+    }
+    closeForm();
+    await loadData();
+    if (onChanged) onChanged();
+  }
+
+  async function handleDelete(t) {
+    const ok =
+      typeof window !== 'undefined' &&
+      window.confirm(
+        `Delete "${t.title}"?\n\nThis also permanently removes any evaluations, responses and ` +
+          `results linked to this training. This cannot be undone.`
+      );
+    if (!ok) return;
+
+    const { error } = await supabase.from('trainings').delete().eq('id', t.id);
+    if (error) {
+      alert('Could not delete: ' + error.message);
+      return;
+    }
+    await loadData();
+    if (onChanged) onChanged();
+  }
+
+  function toggleParticipants(id) {
+    setParticipantsFor(participantsFor === id ? null : id);
+  }
+
+  async function toggleAssignment(trainingId, employeeId) {
+    setSavingParticipants(true);
+    const current = assignments[trainingId] || new Set();
+    const isAssigned = current.has(employeeId);
+
+    if (isAssigned) {
+      await supabase
+        .from('training_assignments')
+        .delete()
+        .eq('training_id', trainingId)
+        .eq('employee_id', employeeId);
+    } else {
+      await supabase
+        .from('training_assignments')
+        .insert({ training_id: trainingId, employee_id: employeeId });
+    }
+
+    await loadData();
+    setSavingParticipants(false);
+    if (onChanged) onChanged();
   }
 
   if (loading) return <div className="center-note">Loading…</div>;
 
   return (
-    <div className="page">
-      <div className="welcome">
-        <h1>Admin console</h1>
-        <p>Manage trainings, strategic goals and reporting for the organisation.</p>
-      </div>
-
-      <div className="stats">
-        <div className="stat"><div className="value">{stats.trainings}</div><div className="label">Trainings</div></div>
-        <div className="stat"><div className="value">{stats.wigs}</div><div className="label">Strategic WIGs</div></div>
-        <div className="stat"><div className="value">{stats.evals}</div><div className="label">Evaluations launched</div></div>
-        <div className="stat"><div className="value">{stats.responses}</div><div className="label">Responses collected</div></div>
-      </div>
-
-      <div className="tabs">
-        <button
-          className={`tab ${tab === 'trainings' ? 'active' : ''}`}
-          onClick={() => setTab('trainings')}
-        >
-          Trainings
-        </button>
-        <button
-          className={`tab ${tab === 'evaluations' ? 'active' : ''}`}
-          onClick={() => setTab('evaluations')}
-        >
-          Evaluations
-        </button>
-        <button
-          className={`tab ${tab === 'wigs' ? 'active' : ''}`}
-          onClick={() => setTab('wigs')}
-        >
-          Strategic goals
-        </button>
-      </div>
-
-      <div style={{ marginBottom: 20 }}>
-        {tab === 'trainings' && (
-          <TrainingsManager profile={profile} onChanged={handleChanged} refreshKey={refreshKey} />
+    <div className="card">
+      <div className="card-head">
+        <h2>Trainings</h2>
+        {formOpen ? (
+          <button className="btn-small" onClick={closeForm}>Cancel</button>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-small" onClick={() => setBulkOpen(true)}>⬆ Bulk upload</button>
+            <button className="btn-small" onClick={openCreate}>+ Register training</button>
+          </div>
         )}
-        {tab === 'evaluations' && (
-          <EvaluationManager profile={profile} onChanged={handleChanged} refreshKey={refreshKey} />
-        )}
-        {tab === 'wigs' && <WigManager profile={profile} onChanged={handleChanged} />}
       </div>
 
-      <AiInsightCard initialInsight={insight} profileId={profile.id} summary={aiSummary} />
+      {bulkOpen && (
+        <div style={{ marginBottom: 20 }}>
+          <BulkTrainingUpload
+            onClose={() => setBulkOpen(false)}
+            onDone={async () => { await loadData(); if (onChanged) onChanged(); }}
+          />
+        </div>
+      )}
+
+      {formOpen && (
+        <form onSubmit={handleSubmit} className="inline-form">
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>
+            {editingId ? 'Edit training' : 'New training'}
+          </div>
+          {msg ? <div className="login-error" style={{ marginBottom: 14 }}>{msg}</div> : null}
+          <div className="form-grid">
+            <div className="field">
+              <label>Title</label>
+              <input value={form.title} onChange={(e) => setField('title', e.target.value)} placeholder="e.g. Fraud Awareness Bootcamp" />
+            </div>
+            <div className="field">
+              <label>Type</label>
+              <select value={form.ttype} onChange={(e) => setField('ttype', e.target.value)}>
+                <option value="internal">Internal</option>
+                <option value="external">External</option>
+              </select>
+            </div>
+            <div className="field field-wide">
+              <label>One-line objective</label>
+              <input value={form.objective} onChange={(e) => setField('objective', e.target.value)} placeholder="What should this training achieve?" />
+            </div>
+            <div className="field">
+              <label>Linked WIG</label>
+              <select value={form.wigId} onChange={(e) => setField('wigId', e.target.value)}>
+                <option value="">— select —</option>
+                {wigs.map((w) => (
+                  <option key={w.id} value={w.id}>{pretty(w.name)}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Target audience</label>
+              <input value={form.audience} onChange={(e) => setField('audience', e.target.value)} placeholder="e.g. Sales agents" />
+            </div>
+            <div className="field">
+              <label>Status</label>
+              <select value={form.status} onChange={(e) => setField('status', e.target.value)}>
+                <option value="draft">Draft</option>
+                <option value="active">Active</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Delivery mode</label>
+              <select value={form.deliveryMode} onChange={(e) => setField('deliveryMode', e.target.value)}>
+                <option value="physical">Physical</option>
+                <option value="virtual">Virtual</option>
+                <option value="blended">Blended</option>
+              </select>
+              <div className="field-hint">Platform questions appear on Level 1 for virtual/blended only.</div>
+            </div>
+            <div className="field">
+              <label>Facilitator / institution</label>
+              <input
+                value={form.facilitator}
+                onChange={(e) => setField('facilitator', e.target.value)}
+                placeholder="e.g. Dolapo Fasuyi, or Fitch Learning"
+              />
+            </div>
+            <div className="field">
+              <label>Facilitator type</label>
+              <select
+                value={form.facilitatorKind}
+                onChange={(e) => setField('facilitatorKind', e.target.value)}
+                disabled={!form.facilitator.trim()}
+              >
+                <option value="individual">Individual</option>
+                <option value="institution">Institution</option>
+              </select>
+            </div>
+          </div>
+          <button type="submit" className="btn-primary" style={{ width: 'auto', padding: '10px 22px' }} disabled={saving}>
+            {saving ? 'Saving…' : editingId ? 'Save changes' : 'Save training'}
+          </button>
+        </form>
+      )}
+
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th><th>Type</th><th>Facilitator</th><th>WIG</th>
+            <th style={{ textAlign: 'center' }}>Participants</th>
+            <th>Status</th>
+            <th style={{ textAlign: 'right' }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {trainings.map((t) => {
+            const assigned = assignments[t.id] || new Set();
+            const isOpen = participantsFor === t.id;
+            return (
+              <Fragment key={t.id}>
+                <tr>
+                  <td>{t.title}</td>
+                  <td style={{ textTransform: 'capitalize' }}>
+                    {t.training_type}
+                    <div className="field-hint" style={{ marginTop: 2 }}>{t.delivery_mode || 'physical'}</div>
+                  </td>
+                  <td>
+                    {t.facilitator || <span style={{ color: 'var(--muted)' }}>—</span>}
+                  </td>
+                  <td>{pretty(t.wigs?.name)}</td>
+                  <td style={{ textAlign: 'center' }}>
+                    <button className="link-btn" onClick={() => toggleParticipants(t.id)}>
+                      <span className="count-chip">{assigned.size}</span>
+                    </button>
+                  </td>
+                  <td><span className={`pill ${t.status}`}>{t.status}</span></td>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button className="link-btn" onClick={() => toggleParticipants(t.id)}>
+                      {isOpen ? 'Hide' : 'Participants'}
+                    </button>
+                    <button className="link-btn" onClick={() => startEdit(t)}>Edit</button>
+                    <button className="link-btn danger" onClick={() => handleDelete(t)}>Delete</button>
+                  </td>
+                </tr>
+                {isOpen && (
+                  <tr>
+                    <td colSpan={7} className="detail-cell">
+                      <div className="detail-box">
+                        <div className="detail-title">
+                          Who attended “{t.title}”
+                          {savingParticipants ? ' — saving…' : ''}
+                        </div>
+                        {employees.length === 0 ? (
+                          <div className="empty" style={{ padding: '6px 0' }}>
+                            No employees found. Add users with the “employee” role first.
+                          </div>
+                        ) : (
+                          <div className="checkbox-list">
+                            {employees.map((emp) => (
+                              <label key={emp.id} className="checkbox-row">
+                                <input
+                                  type="checkbox"
+                                  checked={assigned.has(emp.id)}
+                                  disabled={savingParticipants}
+                                  onChange={() => toggleAssignment(t.id, emp.id)}
+                                />
+                                <span>{emp.full_name}</span>
+                                <span className="dept-tag">{emp.department || '—'}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        <div className="field-hint">
+                          Ticking someone enrols them. They will then see any evaluation launched
+                          for this training with “programme” scope.
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+          {trainings.length === 0 && (
+            <tr><td colSpan={7} className="empty">No trainings yet. Click “Register training”.</td></tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
