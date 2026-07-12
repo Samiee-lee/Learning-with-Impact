@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { pretty } from '../lib/format';
+import BulkTrainingUpload from './BulkTrainingUpload';
 
 const EMPTY = {
   title: '', objective: '', ttype: 'internal', wigId: '', audience: '', status: 'draft',
@@ -17,6 +18,7 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
   const [assignments, setAssignments] = useState({}); // training_id -> Set(employee_id)
 
   const [formOpen, setFormOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -184,9 +186,21 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
         {formOpen ? (
           <button className="btn-small" onClick={closeForm}>Cancel</button>
         ) : (
-          <button className="btn-small" onClick={openCreate}>+ Register training</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-small" onClick={() => setBulkOpen(true)}>⬆ Bulk upload</button>
+            <button className="btn-small" onClick={openCreate}>+ Register training</button>
+          </div>
         )}
       </div>
+
+      {bulkOpen && (
+        <div style={{ marginBottom: 20 }}>
+          <BulkTrainingUpload
+            onClose={() => setBulkOpen(false)}
+            onDone={async () => { await loadData(); if (onChanged) onChanged(); }}
+          />
+        </div>
+      )}
 
       {formOpen && (
         <form onSubmit={handleSubmit} className="inline-form">
