@@ -8,6 +8,7 @@ import WigManager from './WigManager';
 import EvaluationManager from './EvaluationManager';
 import ReportsManager from './ReportsManager';
 import FeedbackViewer from './FeedbackViewer';
+import ResultsManager from './ResultsManager';
 
 export default function AdminDashboard({ profile }) {
   const [loading, setLoading] = useState(true);
@@ -114,6 +115,12 @@ export default function AdminDashboard({ profile }) {
         >
           Feedback
         </button>
+        <button
+          className={`tab ${tab === 'results' ? 'active' : ''}`}
+          onClick={() => setTab('results')}
+        >
+          Results (L4)
+        </button>
       </div>
 
       <div style={{ marginBottom: 20 }}>
@@ -126,6 +133,7 @@ export default function AdminDashboard({ profile }) {
         {tab === 'wigs' && <WigManager profile={profile} onChanged={handleChanged} />}
         {tab === 'reports' && <ReportsManager />}
         {tab === 'feedback' && <FeedbackViewer />}
+        {tab === 'results' && <ResultsManager />}
       </div>
 
       <AiInsightCard initialInsight={insight} profileId={profile.id} summary={aiSummary} />
