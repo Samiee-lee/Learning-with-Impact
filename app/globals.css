@@ -383,3 +383,21 @@ tr:last-child td { border-bottom: none; }
 }
 .resp-block { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
 .resp-name { font-size: 13px; font-weight: 700; color: var(--brand); margin-bottom: 12px; }
+
+/* ============ Phase 8 — Export & print ============ */
+.export-bar { display: flex; gap: 8px; }
+
+@media print {
+  .topbar, .tabs, .btn-small, .link-btn, .btn-signout,
+  .ai-summary-bar button, .export-bar, .welcome p { display: none !important; }
+  body { background: #fff; }
+  .page { padding: 0; max-width: 100%; }
+  .card {
+    border: 1px solid #ccc; box-shadow: none; break-inside: avoid; page-break-inside: avoid;
+    margin-bottom: 14px;
+  }
+  .level-card.selectable.active { box-shadow: none; }
+  .level-card { break-inside: avoid; }
+  h1 { font-size: 18px; }
+  @page { margin: 16mm; }
+}
