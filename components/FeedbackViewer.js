@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { LEVELS } from '../lib/evaluationConfig';
+import { downloadCSV, printView, today } from '../lib/exporters';
 
 export default function FeedbackViewer() {
   const [loading, setLoading] = useState(true);
@@ -47,6 +48,7 @@ export default function FeedbackViewer() {
       .eq('evaluation_id', ev.id)
       .order('question_order');
 
+    // Privacy by design: for anonymous levels we never even fetch names.
     const sel = named ? 'id, submitted_at, profiles(full_name)' : 'id, submitted_at';
     const { data: responses } = await supabase
       .from('evaluation_responses')
@@ -125,8 +127,27 @@ export default function FeedbackViewer() {
     setSummarising(false);
   }
 
+  function exportDetailCSV() {
+    if (!detail) return;
+    const m = [];
+    m.push([selected.trainings?.title || 'Training', `Level ${selected.level}`, today()]);
+    m.push([]);
+    const header = ['Respondent', ...detail.questions.map((q) => q.question_text)];
+    m.push(header);
+    detail.responses.forEach((r) => {
+      const row = [r.label];
+      detail.questions.forEach((q) => {
+        const a = r.answers[q.id];
+        row.push(a ? (a.answer_text || (a.answer_numeric !== null && a.answer_numeric !== undefined ? a.answer_numeric : '')) : '');
+      });
+      m.push(row);
+    });
+    downloadCSV(`feedback-L${selected.level}-${today()}.csv`, m);
+  }
+
   if (loading) return <div className="center-note">Loading…</div>;
 
+  // ---- Detail view ----
   if (selected) {
     return (
       <div className="card">
@@ -153,6 +174,8 @@ export default function FeedbackViewer() {
               >
                 {summarising ? 'Summarising…' : '✨ Summarise with AI'}
               </button>
+              <button className="btn-small" onClick={exportDetailCSV} disabled={detail.responses.length === 0}>⬇ Export CSV</button>
+              <button className="btn-small" onClick={printView} disabled={detail.responses.length === 0}>🖨 Print / PDF</button>
               {!detail.named && <span className="field-hint">Responses are anonymous at this level.</span>}
             </div>
 
@@ -191,6 +214,7 @@ export default function FeedbackViewer() {
     );
   }
 
+  // ---- List view ----
   return (
     <div className="card">
       <h2>Evaluation feedback</h2>
