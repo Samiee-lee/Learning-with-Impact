@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { pretty } from '../lib/format';
 import BulkTrainingUpload from './BulkTrainingUpload';
+import BulkAssignParticipants from './BulkAssignParticipants';
 
 const EMPTY = {
   title: '', objective: '', ttype: 'internal', wigId: '', audience: '', status: 'draft',
@@ -19,6 +20,7 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
 
   const [formOpen, setFormOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -187,6 +189,7 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
           <button className="btn-small" onClick={closeForm}>Cancel</button>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-small" onClick={() => setAssignOpen(true)}>⬆ Bulk assign</button>
             <button className="btn-small" onClick={() => setBulkOpen(true)}>⬆ Bulk upload</button>
             <button className="btn-small" onClick={openCreate}>+ Register training</button>
           </div>
@@ -197,6 +200,15 @@ export default function TrainingsManager({ profile, onChanged, refreshKey }) {
         <div style={{ marginBottom: 20 }}>
           <BulkTrainingUpload
             onClose={() => setBulkOpen(false)}
+            onDone={async () => { await loadData(); if (onChanged) onChanged(); }}
+          />
+        </div>
+      )}
+
+      {assignOpen && (
+        <div style={{ marginBottom: 20 }}>
+          <BulkAssignParticipants
+            onClose={() => setAssignOpen(false)}
             onDone={async () => { await loadData(); if (onChanged) onChanged(); }}
           />
         </div>
