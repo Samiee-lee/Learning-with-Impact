@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Donut, BarList } from './Charts';
 import { downloadCSV, printView, today } from '../lib/exporters';
+import { attainment } from './KpiManager';
 
 const DIST_COLORS = ['#b42318', '#d1662a', '#e0a800', '#5aa469', '#1a7f43'];
 
@@ -27,18 +28,20 @@ export default function ReportsManager() {
 
   const [l1Sections, setL1Sections] = useState([]);
   const [l2Dist, setL2Dist] = useState([0, 0, 0, 0, 0]);
-  const [l4Dist, setL4Dist] = useState([0, 0, 0, 0, 0]);
+  const [l4Wigs, setL4Wigs] = useState([]); // [{name, pct}]
   const [l3Split, setL3Split] = useState({ validated: 0, pending: 0 });
 
   useEffect(() => {
     async function load() {
-      const [evalsR, qsR, ansR, valR, respR, trR] = await Promise.all([
+      const [evalsR, qsR, ansR, valR, respR, trR, wigsR, kpisR] = await Promise.all([
         supabase.from('evaluations').select('id, level, training_id'),
         supabase.from('evaluation_questions').select('id, evaluation_id, section'),
         supabase.from('response_answers').select('question_id, answer_numeric'),
         supabase.from('manager_validations').select('validated, response_id'),
         supabase.from('evaluation_responses').select('id, evaluation_id'),
-        supabase.from('trainings').select('id, title, facilitator, facilitator_kind'),
+        supabase.from('trainings').select('id, title, facilitator, facilitator_kind, wig_id'),
+        supabase.from('wigs').select('id, name'),
+        supabase.from('wig_kpis').select('id, wig_id, direction, baseline, target, current'),
       ]);
 
       const evalById = {};
@@ -53,17 +56,40 @@ export default function ReportsManager() {
       (respR.data || []).forEach((r) => (respToEval[r.id] = r.evaluation_id));
       const trainingById = {};
       (trR.data || []).forEach((t) => (trainingById[t.id] = t));
+      const wigNameById = {};
+      (wigsR.data || []).forEach((w) => (wigNameById[w.id] = w.name));
 
-      const levelAgg = { 1: { s: 0, n: 0 }, 2: { s: 0, n: 0 }, 4: { s: 0, n: 0 } };
+      // ---- KPI attainment per WIG (the real Level 4) ----
+      const wigAtt = {}; // wig_id -> { sum, n }
+      (kpisR.data || []).forEach((k) => {
+        const a = attainment(k);
+        if (a === null) return;
+        if (!wigAtt[k.wig_id]) wigAtt[k.wig_id] = { sum: 0, n: 0 };
+        wigAtt[k.wig_id].sum += a;
+        wigAtt[k.wig_id].n += 1;
+      });
+      const wigPct = {}; // wig_id -> percent
+      Object.entries(wigAtt).forEach(([id, v]) => (wigPct[id] = (v.sum / v.n) * 100));
+
+      // org-wide L4 = mean of all complete KPIs
+      let l4sum = 0;
+      let l4n = 0;
+      (kpisR.data || []).forEach((k) => {
+        const a = attainment(k);
+        if (a === null) return;
+        l4sum += a;
+        l4n += 1;
+      });
+
+      const levelAgg = { 1: { s: 0, n: 0 }, 2: { s: 0, n: 0 } };
       const perT = {};
       const ensureT = (id) => {
-        if (!perT[id]) perT[id] = { 1: { s: 0, n: 0 }, 2: { s: 0, n: 0 }, 4: { s: 0, n: 0 }, 3: { v: 0, t: 0 } };
+        if (!perT[id]) perT[id] = { 1: { s: 0, n: 0 }, 2: { s: 0, n: 0 }, 3: { v: 0, t: 0 } };
         return perT[id];
       };
       const facAgg = {};
       const sectionAgg = {};
       const l2counts = [0, 0, 0, 0, 0];
-      const l4counts = [0, 0, 0, 0, 0];
 
       (ansR.data || []).forEach((a) => {
         if (a.answer_numeric === null || a.answer_numeric === undefined) return;
@@ -72,7 +98,7 @@ export default function ReportsManager() {
         const lvl = ev.level;
         const val = Number(a.answer_numeric);
 
-        if (lvl === 1 || lvl === 2 || lvl === 4) {
+        if (lvl === 1 || lvl === 2) {
           levelAgg[lvl].s += val;
           levelAgg[lvl].n += 1;
           const t = ensureT(ev.training_id);
@@ -96,9 +122,10 @@ export default function ReportsManager() {
           }
         }
 
-        const idx = Math.min(5, Math.max(1, Math.round(val))) - 1;
-        if (lvl === 2) l2counts[idx] += 1;
-        if (lvl === 4) l4counts[idx] += 1;
+        if (lvl === 2) {
+          const idx = Math.min(5, Math.max(1, Math.round(val))) - 1;
+          l2counts[idx] += 1;
+        }
       });
 
       let orgVal = { v: 0, t: 0 };
@@ -119,21 +146,26 @@ export default function ReportsManager() {
       });
 
       const ls = {};
-      [1, 2, 4].forEach((l) => {
+      [1, 2].forEach((l) => {
         ls[l] = levelAgg[l].n ? { avg: levelAgg[l].s / levelAgg[l].n, n: levelAgg[l].n } : null;
       });
       ls[3] = orgVal.t ? { rate: Math.round((orgVal.v / orgVal.t) * 100), n: orgVal.t } : null;
+      ls[4] = l4n ? { pct: Math.round((l4sum / l4n) * 100), n: l4n } : null;
       setLevels(ls);
 
       setRows(
         Object.entries(perT)
-          .map(([id, m]) => ({
-            title: trainingById[id]?.title || '—',
-            l1: m[1].n ? m[1].s / m[1].n : null,
-            l2: m[2].n ? m[2].s / m[2].n : null,
-            l3: m[3].t ? Math.round((m[3].v / m[3].t) * 100) : null,
-            l4: m[4].n ? m[4].s / m[4].n : null,
-          }))
+          .map(([id, m]) => {
+            const tr = trainingById[id];
+            const wid = tr && tr.wig_id;
+            return {
+              title: tr?.title || '—',
+              l1: m[1].n ? m[1].s / m[1].n : null,
+              l2: m[2].n ? m[2].s / m[2].n : null,
+              l3: m[3].t ? Math.round((m[3].v / m[3].t) * 100) : null,
+              l4: wid && wigPct[wid] !== undefined ? Math.round(wigPct[wid]) : null,
+            };
+          })
           .sort((a, b) => (a.title > b.title ? 1 : -1))
       );
 
@@ -153,7 +185,11 @@ export default function ReportsManager() {
           .sort((a, b) => a.value - b.value)
       );
       setL2Dist(l2counts);
-      setL4Dist(l4counts);
+      setL4Wigs(
+        Object.entries(wigPct)
+          .map(([id, pct]) => ({ name: wigNameById[id] || 'Goal', pct }))
+          .sort((a, b) => a.pct - b.pct)
+      );
       setL3Split(split);
 
       setLoading(false);
@@ -170,17 +206,17 @@ export default function ReportsManager() {
     m.push(['L1 Reaction (avg/5)', levels[1] ? levels[1].avg.toFixed(1) : '—']);
     m.push(['L2 Learning (avg/5)', levels[2] ? levels[2].avg.toFixed(1) : '—']);
     m.push(['L3 Behaviour (% validated)', levels[3] ? levels[3].rate + '%' : '—']);
-    m.push(['L4 Results (avg/5)', levels[4] ? levels[4].avg.toFixed(1) : '—']);
+    m.push(['L4 Results (% KPI attainment)', levels[4] ? levels[4].pct + '%' : '—']);
     m.push([]);
     m.push(['Where each programme stands']);
-    m.push(['Training', 'L1', 'L2', 'L3 validated %', 'L4']);
+    m.push(['Training', 'L1', 'L2', 'L3 validated %', 'L4 KPI %']);
     rows.forEach((r) =>
       m.push([
         r.title,
         r.l1 === null ? '' : r.l1.toFixed(1),
         r.l2 === null ? '' : r.l2.toFixed(1),
         r.l3 === null ? '' : r.l3 + '%',
-        r.l4 === null ? '' : r.l4.toFixed(1),
+        r.l4 === null ? '' : r.l4 + '%',
       ])
     );
     m.push([]);
@@ -234,17 +270,34 @@ export default function ReportsManager() {
     }
     return (
       <div>
-        <div className="drill-title">Level 4 — impact score distribution</div>
-        <Donut segments={distSegments(l4Dist)} center={levels[4] ? levels[4].avg.toFixed(1) : '—'} centerSub="avg /5" />
+        <div className="drill-title">Level 4 — KPI attainment by strategic goal</div>
+        {l4Wigs.length === 0 ? (
+          <div className="empty">No KPI data yet. Add KPIs under Strategic goals, then update their current values.</div>
+        ) : (
+          <div className="bars">
+            {l4Wigs.map((w, i) => (
+              <div className="bar-row" key={i}>
+                <div className="bar-label">{w.name}</div>
+                <div className="bar-track">
+                  <div className={`bar-fill ${band(w.pct, 100)}`} style={{ width: `${Math.max(0, Math.min(100, w.pct))}%` }} />
+                </div>
+                <div className="bar-value">{Math.round(w.pct)}%</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="field-hint" style={{ marginTop: 10 }}>
+          Level 4 now reflects real KPI movement. Full interpretation is on the Results (L4) tab.
+        </div>
       </div>
     );
   }
 
   const cardDef = [
-    { l: 1, name: 'L1 · Reaction', v: levels[1] ? levels[1].avg.toFixed(1) : '—', unit: '/5', n: levels[1]?.n, b: band(levels[1]?.avg, 5) },
-    { l: 2, name: 'L2 · Learning', v: levels[2] ? levels[2].avg.toFixed(1) : '—', unit: '/5', n: levels[2]?.n, b: band(levels[2]?.avg, 5) },
-    { l: 3, name: 'L3 · Behaviour', v: levels[3] ? levels[3].rate : '—', unit: '%', n: levels[3]?.n, b: band(levels[3]?.rate, 100) },
-    { l: 4, name: 'L4 · Results', v: levels[4] ? levels[4].avg.toFixed(1) : '—', unit: '/5', n: levels[4]?.n, b: band(levels[4]?.avg, 5) },
+    { l: 1, name: 'L1 · Reaction', v: levels[1] ? levels[1].avg.toFixed(1) : '—', unit: '/5', n: levels[1]?.n, sub: 'answers', b: band(levels[1]?.avg, 5) },
+    { l: 2, name: 'L2 · Learning', v: levels[2] ? levels[2].avg.toFixed(1) : '—', unit: '/5', n: levels[2]?.n, sub: 'answers', b: band(levels[2]?.avg, 5) },
+    { l: 3, name: 'L3 · Behaviour', v: levels[3] ? levels[3].rate : '—', unit: '%', n: levels[3]?.n, sub: 'validated', b: band(levels[3]?.rate, 100) },
+    { l: 4, name: 'L4 · Results', v: levels[4] ? levels[4].pct : '—', unit: '%', n: levels[4]?.n, sub: 'KPIs', b: band(levels[4]?.pct, 100) },
   ];
 
   return (
@@ -258,7 +311,7 @@ export default function ReportsManager() {
           </div>
         </div>
         <div className="field-hint" style={{ marginBottom: 14 }}>
-          Click a level to drill into what’s driving it. Higher is always better.
+          Click a level to drill into what’s driving it. Higher is always better. L4 is real KPI attainment.
         </div>
         <div className="level-cards">
           {cardDef.map((c) => (
@@ -269,7 +322,7 @@ export default function ReportsManager() {
             >
               <div className="lc-name">{c.name}</div>
               <div className="lc-value">{c.v}<span className="lc-unit">{c.unit}</span></div>
-              <div className="lc-n">{c.n ? `${c.n} ${c.l === 3 ? 'validated' : 'answers'}` : 'no data'}</div>
+              <div className="lc-n">{c.n ? `${c.n} ${c.sub}` : 'no data'}</div>
             </button>
           ))}
         </div>
@@ -288,7 +341,7 @@ export default function ReportsManager() {
               <th style={{ textAlign: 'center' }}>L1</th>
               <th style={{ textAlign: 'center' }}>L2</th>
               <th style={{ textAlign: 'center' }}>L3 ✓%</th>
-              <th style={{ textAlign: 'center' }}>L4</th>
+              <th style={{ textAlign: 'center' }}>L4 KPI%</th>
             </tr>
           </thead>
           <tbody>
@@ -298,7 +351,7 @@ export default function ReportsManager() {
                 <td style={{ textAlign: 'center' }}><span className={`score ${band(r.l1, 5)}`}>{fmt(r.l1)}</span></td>
                 <td style={{ textAlign: 'center' }}><span className={`score ${band(r.l2, 5)}`}>{fmt(r.l2)}</span></td>
                 <td style={{ textAlign: 'center' }}><span className={`score ${band(r.l3, 100)}`}>{r.l3 === null ? '—' : r.l3 + '%'}</span></td>
-                <td style={{ textAlign: 'center' }}><span className={`score ${band(r.l4, 5)}`}>{fmt(r.l4)}</span></td>
+                <td style={{ textAlign: 'center' }}><span className={`score ${band(r.l4, 100)}`}>{r.l4 === null ? '—' : r.l4 + '%'}</span></td>
               </tr>
             ))}
             {rows.length === 0 && <tr><td colSpan={5} className="empty">No evaluation data yet.</td></tr>}
