@@ -56,6 +56,24 @@ export async function POST(request) {
         `Strategic goal (WIG): ${data?.wig || '(none)'}\n` +
         `Target audience: ${data?.audience || '(not specified)'}\n\n` +
         `Write the Level ${level} questions now as a JSON array.`;
+    } else if (kind === 'feedback_summary') {
+      maxTokens = 600;
+      system =
+        'You are an L&D evaluation analyst. Summarise participant feedback honestly and ' +
+        'concisely for a training team. Using ONLY what is provided, produce four short parts, ' +
+        'each on its own line and clearly labelled:\n' +
+        'Themes: (2-3 sentences on the overall picture)\n' +
+        'What went well: (the strongest points)\n' +
+        'What to improve: (the clearest weaknesses)\n' +
+        'Recommended action: (one concrete next step)\n' +
+        'Keep the whole thing under 170 words. Never invent details not in the comments or scores. ' +
+        'Plain text only — no markdown symbols, no asterisks, no hashes.';
+      userContent =
+        `Training: ${data?.title || '(untitled)'}\n` +
+        `Evaluation: Level ${data?.level} — ${data?.levelName || ''}\n` +
+        `${data?.scoreNote || ''}\n\n` +
+        `Participant comments:\n${(data?.comments || []).join('\n') || '(no free-text comments)'}\n\n` +
+        'Write the summary now.';
     } else {
       return NextResponse.json({ error: 'Unknown request type.' }, { status: 400 });
     }
