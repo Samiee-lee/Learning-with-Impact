@@ -6,6 +6,7 @@ import AiInsightCard from './AiInsightCard';
 import TrainingsManager from './TrainingsManager';
 import WigManager from './WigManager';
 import EvaluationManager from './EvaluationManager';
+import ReportsManager from './ReportsManager';
 
 export default function AdminDashboard({ profile }) {
   const [loading, setLoading] = useState(true);
@@ -100,6 +101,12 @@ export default function AdminDashboard({ profile }) {
         >
           Strategic goals
         </button>
+        <button
+          className={`tab ${tab === 'reports' ? 'active' : ''}`}
+          onClick={() => setTab('reports')}
+        >
+          Reports
+        </button>
       </div>
 
       <div style={{ marginBottom: 20 }}>
@@ -110,6 +117,7 @@ export default function AdminDashboard({ profile }) {
           <EvaluationManager profile={profile} onChanged={handleChanged} refreshKey={refreshKey} />
         )}
         {tab === 'wigs' && <WigManager profile={profile} onChanged={handleChanged} />}
+        {tab === 'reports' && <ReportsManager />}
       </div>
 
       <AiInsightCard initialInsight={insight} profileId={profile.id} summary={aiSummary} />
