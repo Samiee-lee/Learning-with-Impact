@@ -288,11 +288,13 @@ export default function EvaluationManager({ profile, onChanged, refreshKey }) {
             <div className="field">
               <label>Level</label>
               <select value={level} onChange={(e) => { setLevel(e.target.value); setDraftQuestions(null); }}>
-                {[1, 2, 3, 4].map((l) => (
+                {[1, 2, 3].map((l) => (
                   <option key={l} value={l}>Level {l} — {LEVELS[l].name}</option>
                 ))}
               </select>
-              <div className="field-hint">{LEVELS[Number(level)].blurb}</div>
+              <div className="field-hint">
+                {LEVELS[Number(level)].blurb}. Level 4 (Results) is measured from real KPIs — see the Results (L4) tab.
+              </div>
             </div>
             <div className="field">
               <label>Scope</label>
