@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabaseClient';
 import { Donut, BarList } from './Charts';
 import { downloadCSV, printView, today } from '../lib/exporters';
 
-const DIST_COLORS = ['#b42318', '#d1662a', '#e0a800', '#5aa469', '#1a7f43']; // scores 1..5
+const DIST_COLORS = ['#b42318', '#d1662a', '#e0a800', '#5aa469', '#1a7f43'];
 
 function band(v, max) {
   if (v === null || v === undefined) return '';
