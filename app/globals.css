@@ -369,3 +369,17 @@ tr:last-child td { border-bottom: none; }
 .legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
 
 @media (max-width: 780px) { .donut-wrap { justify-content: center; } }
+
+/* ============ Phase 7b-3 — Feedback viewer ============ */
+.ai-summary-bar { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.ai-summary {
+  background: #f6f8ff; border: 1px solid #dfe4fb; border-radius: 12px;
+  padding: 16px 18px; margin-bottom: 20px; font-size: 13.5px; line-height: 1.6; color: #2c3346;
+}
+.ai-summary .tag {
+  display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--brand); background: #e8f0ff;
+  padding: 3px 9px; border-radius: 6px; margin-bottom: 10px;
+}
+.resp-block { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+.resp-name { font-size: 13px; font-weight: 700; color: var(--brand); margin-bottom: 12px; }
