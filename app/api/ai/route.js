@@ -74,6 +74,24 @@ export async function POST(request) {
         `${data?.scoreNote || ''}\n\n` +
         `Participant comments:\n${(data?.comments || []).join('\n') || '(no free-text comments)'}\n\n` +
         'Write the summary now.';
+    } else if (kind === 'results_interpretation') {
+      maxTokens = 650;
+      system =
+        'You are an L&D impact analyst writing for a board audience. You are given a strategic ' +
+        'goal (WIG), its KPIs with baseline/target/current figures, and the trainings aimed at it. ' +
+        'Write a concise, honest interpretation with these labelled parts, each on its own line:\n' +
+        'Movement: what the KPI figures show, citing the actual numbers.\n' +
+        'Against goal: whether the goal is being met, on track, or off track.\n' +
+        'Attribution caveat: state plainly that this shows correlation, not proven causation, and ' +
+        'name 2-3 other plausible drivers of the change besides the training.\n' +
+        'Strengthen the evidence: one concrete next step to better isolate the training’s contribution.\n' +
+        'Under 180 words. Never claim the training caused the change. ' +
+        'Plain text only — no markdown, no asterisks, no hashes.';
+      userContent =
+        `Strategic goal: ${data?.wig || '(unnamed)'}\n\n` +
+        `KPIs:\n${(data?.kpis || []).join('\n') || '(none entered)'}\n\n` +
+        `Trainings aimed at this goal:\n${(data?.trainings || []).join('\n') || '(none)'}\n\n` +
+        'Write the interpretation now.';
     } else {
       return NextResponse.json({ error: 'Unknown request type.' }, { status: 400 });
     }
