@@ -56,9 +56,10 @@ export default function Home() {
     }
   }
 
+  const isAdmin = profile?.role === 'administrator';
   return (
     <div>
-      <TopBar profile={profile} />
+      {!isAdmin && <TopBar profile={profile} />}
       {renderDashboard()}
     </div>
   );
