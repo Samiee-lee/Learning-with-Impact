@@ -12,12 +12,12 @@ import ResultsManager from './ResultsManager';
 import AppShell from './AppShell';
 
 const NAV = [
-  { key: 'trainings', label: 'Trainings' },
-  { key: 'evaluations', label: 'Evaluations' },
-  { key: 'wigs', label: 'Strategic goals' },
-  { key: 'reports', label: 'Reports' },
-  { key: 'feedback', label: 'Feedback' },
-  { key: 'results', label: 'Results (L4)' },
+  { key: 'trainings', label: 'Trainings', icon: 'trainings' },
+  { key: 'evaluations', label: 'Evaluations', icon: 'evaluations' },
+  { key: 'wigs', label: 'Strategic goals', icon: 'wigs' },
+  { key: 'reports', label: 'Reports', icon: 'reports' },
+  { key: 'feedback', label: 'Feedback', icon: 'feedback' },
+  { key: 'results', label: 'Results (L4)', icon: 'results' },
 ];
 
 export default function AdminDashboard({ profile }) {
