@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import AppShell from './AppShell';
 import { pretty } from '../lib/format';
 import AiInsightCard from './AiInsightCard';
+
+const NAV = [{ key: 'impact', label: 'Impact overview', icon: 'impact' }];
 
 export default function ExecutiveDashboard({ profile }) {
   const [loading, setLoading] = useState(true);
@@ -69,11 +72,7 @@ export default function ExecutiveDashboard({ profile }) {
   const maxCount = Math.max(1, ...wigRollup.map((w) => w.count));
 
   return (
-    <div className="page">
-      <div className="welcome">
-        <h1>Executive impact view</h1>
-        <p>How learning investment is tracking against strategic goals.</p>
-      </div>
+    <AppShell profile={profile} nav={NAV} active="impact" onSelect={() => {}} title="Executive impact view" subtitle="How learning investment is tracking against strategic goals.">
 
       <div className="stats">
         <div className="stat"><div className="value">{avgReaction ?? '—'}<span className="unit">/5</span></div><div className="label">Avg learning rating</div></div>
@@ -109,6 +108,6 @@ export default function ExecutiveDashboard({ profile }) {
           }
         />
       </div>
-    </div>
+    </AppShell>
   );
 }
