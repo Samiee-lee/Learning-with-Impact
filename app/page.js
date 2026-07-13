@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../lib/supabaseClient';
-import TopBar from '../components/TopBar';
 import AdminDashboard from '../components/AdminDashboard';
 import EmployeeDashboard from '../components/EmployeeDashboard';
 import ManagerDashboard from '../components/ManagerDashboard';
@@ -56,11 +55,5 @@ export default function Home() {
     }
   }
 
-  const isAdmin = profile?.role === 'administrator';
-  return (
-    <div>
-      {!isAdmin && <TopBar profile={profile} />}
-      {renderDashboard()}
-    </div>
-  );
+  return <div>{renderDashboard()}</div>;
 }
