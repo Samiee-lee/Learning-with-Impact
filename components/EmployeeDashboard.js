@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import AppShell from './AppShell';
 import { pretty } from '../lib/format';
 import { LEVELS } from '../lib/evaluationConfig';
 import EvaluationForm from './EvaluationForm';
+
+const NAV = [{ key: 'learning', label: 'My learning', icon: 'learning' }];
 
 export default function EmployeeDashboard({ profile }) {
   const [loading, setLoading] = useState(true);
@@ -91,11 +94,7 @@ export default function EmployeeDashboard({ profile }) {
   const pending = evals.filter((e) => !e.done);
 
   return (
-    <div className="page">
-      <div className="welcome">
-        <h1>Your learning</h1>
-        <p>Trainings you're enrolled in and evaluations awaiting your input.</p>
-      </div>
+    <AppShell profile={profile} nav={NAV} active="learning" onSelect={() => {}} title="Your learning" subtitle="Trainings you're enrolled in and evaluations awaiting your input.">
 
       {toast ? <div className="toast">{toast}</div> : null}
 
@@ -151,6 +150,6 @@ export default function EmployeeDashboard({ profile }) {
           )}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }
