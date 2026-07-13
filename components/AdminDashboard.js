@@ -9,6 +9,16 @@ import EvaluationManager from './EvaluationManager';
 import ReportsManager from './ReportsManager';
 import FeedbackViewer from './FeedbackViewer';
 import ResultsManager from './ResultsManager';
+import AppShell from './AppShell';
+
+const NAV = [
+  { key: 'trainings', label: 'Trainings' },
+  { key: 'evaluations', label: 'Evaluations' },
+  { key: 'wigs', label: 'Strategic goals' },
+  { key: 'reports', label: 'Reports' },
+  { key: 'feedback', label: 'Feedback' },
+  { key: 'results', label: 'Results (L4)' },
+];
 
 export default function AdminDashboard({ profile }) {
   const [loading, setLoading] = useState(true);
@@ -20,9 +30,7 @@ export default function AdminDashboard({ profile }) {
   const [insight, setInsight] = useState('');
 
   const loadOverview = useCallback(async () => {
-    const { data: tr } = await supabase
-      .from('trainings')
-      .select('title, status, wigs(name)');
+    const { data: tr } = await supabase.from('trainings').select('title, status, wigs(name)');
 
     const [wigRes, evalRes, respRes] = await Promise.all([
       supabase.from('wigs').select('*', { count: 'exact', head: true }),
@@ -62,7 +70,6 @@ export default function AdminDashboard({ profile }) {
     loadOverview();
   }, [loadOverview]);
 
-  // Called by child managers after any create/edit/delete
   function handleChanged() {
     loadOverview();
     setRefreshKey((k) => k + 1);
@@ -71,56 +78,19 @@ export default function AdminDashboard({ profile }) {
   if (loading) return <div className="center-note">Loading…</div>;
 
   return (
-    <div className="page">
-      <div className="welcome">
-        <h1>Admin console</h1>
-        <p>Manage trainings, strategic goals and reporting for the organisation.</p>
-      </div>
-
+    <AppShell
+      profile={profile}
+      nav={NAV}
+      active={tab}
+      onSelect={setTab}
+      title="Admin console"
+      subtitle="Manage trainings, strategic goals and reporting for the organisation."
+    >
       <div className="stats">
         <div className="stat"><div className="value">{stats.trainings}</div><div className="label">Trainings</div></div>
         <div className="stat"><div className="value">{stats.wigs}</div><div className="label">Strategic WIGs</div></div>
         <div className="stat"><div className="value">{stats.evals}</div><div className="label">Evaluations launched</div></div>
         <div className="stat"><div className="value">{stats.responses}</div><div className="label">Responses collected</div></div>
-      </div>
-
-      <div className="tabs">
-        <button
-          className={`tab ${tab === 'trainings' ? 'active' : ''}`}
-          onClick={() => setTab('trainings')}
-        >
-          Trainings
-        </button>
-        <button
-          className={`tab ${tab === 'evaluations' ? 'active' : ''}`}
-          onClick={() => setTab('evaluations')}
-        >
-          Evaluations
-        </button>
-        <button
-          className={`tab ${tab === 'wigs' ? 'active' : ''}`}
-          onClick={() => setTab('wigs')}
-        >
-          Strategic goals
-        </button>
-        <button
-          className={`tab ${tab === 'reports' ? 'active' : ''}`}
-          onClick={() => setTab('reports')}
-        >
-          Reports
-        </button>
-        <button
-          className={`tab ${tab === 'feedback' ? 'active' : ''}`}
-          onClick={() => setTab('feedback')}
-        >
-          Feedback
-        </button>
-        <button
-          className={`tab ${tab === 'results' ? 'active' : ''}`}
-          onClick={() => setTab('results')}
-        >
-          Results (L4)
-        </button>
       </div>
 
       <div style={{ marginBottom: 20 }}>
@@ -137,6 +107,6 @@ export default function AdminDashboard({ profile }) {
       </div>
 
       <AiInsightCard initialInsight={insight} profileId={profile.id} summary={aiSummary} />
-    </div>
+    </AppShell>
   );
 }
