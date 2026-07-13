@@ -2,6 +2,9 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import AppShell from './AppShell';
+
+const NAV = [{ key: 'team', label: 'My team', icon: 'team' }];
 
 export default function ManagerDashboard({ profile }) {
   const [loading, setLoading] = useState(true);
@@ -85,11 +88,7 @@ export default function ManagerDashboard({ profile }) {
   const pending = validations.filter((v) => !v.validated);
 
   return (
-    <div className="page">
-      <div className="welcome">
-        <h1>Team overview</h1>
-        <p>Your direct reports and the behaviour changes awaiting your validation.</p>
-      </div>
+    <AppShell profile={profile} nav={NAV} active="team" onSelect={() => {}} title="Team overview" subtitle="Your direct reports and the behaviour changes awaiting your validation.">
 
       {toast ? <div className="toast">{toast}</div> : null}
 
@@ -209,6 +208,6 @@ export default function ManagerDashboard({ profile }) {
           </table>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }
